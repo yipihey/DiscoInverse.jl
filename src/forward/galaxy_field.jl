@@ -51,7 +51,7 @@ function galaxy_model(res::Int, boxsize::Real, cosmo, pk_table::Dict;
                       R::Real, observer::AbstractVector, a_far::Real, a_near::Real,
                       n_order::Int=3, n_sub::Int=1, rsd::Bool=false, ref_seed::Int=0,
                       T::Type{<:AbstractFloat}=Float64)
-    n_order == 3 || error("galaxy_model currently uses the n_order=3 exact-growth path")
+    n_order in (2, 3) || error("n_order must be 2 (2LPT, ~7× faster) or 3 (3LPT)")
     op  = ic_operator(res, boxsize, pk_table; T=T)
     K   = nlpt_kernels(res, boxsize; T=T)
     ops = bias_operators(res, boxsize, R; T=T)
