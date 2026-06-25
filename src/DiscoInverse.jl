@@ -35,4 +35,16 @@ include("forward/bias.jl")
 export GalaxyModel, galaxy_model, galaxy_density
 include("forward/galaxy_field.jl")
 
+# ── ECHOES data IO ────────────────────────────────────────────────────────────
+export EchoesCatalog, load_echoes_realization, load_echoes_randoms, n_realizations, prov_mask
+include("data/echoes_io.jl")
+
+# ── Geometry: wedge → comoving box ────────────────────────────────────────────
+export fiducial_cosmology, radec_z_to_cartesian, BoxGeometry, box_geometry, embed, embed_radec_z
+include("geometry/embedding.jl")
+
+# ── Survey window ─────────────────────────────────────────────────────────────
+export survey_window, bin_galaxies
+include("window/window.jl")
+
 end # module

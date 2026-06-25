@@ -73,4 +73,23 @@ end
         end
     end
 
+    @testset "Geometry + window (synthetic footprint)" begin
+        cosmo = fiducial_cosmology()
+        rng = MersenneTwister(0); N = 5000
+        ra  = rand(rng, N) .* 20 .+ 100; dec = rand(rng, N) .* 20 .- 5; z = rand(rng, N) .* 0.15 .+ 0.45
+        rnd = (ra=ra, dec=dec, z=z)
+        geom = box_geometry(rnd, cosmo; res=32, pad_frac=0.15)
+        @test geom.boxsize > 0
+        @test isapprox(1 / geom.a_near - 1, 0.45; atol=0.01) && isapprox(1 / geom.a_far - 1, 0.60; atol=0.01)
+        cart = radec_z_to_cartesian(ra, dec, z, cosmo)
+        @test size(cart) == (N, 3)
+        xb = embed(geom, cart)
+        @test all(0 .<= xb .<= geom.boxsize)            # all galaxies inside the box
+        W = survey_window(geom, rnd)
+        @test isapprox(mean(W[W .> 0]), 1.0; atol=1e-6)  # normalized over footprint
+        @test 0 < sum(W .> 0) < length(W)                # partial footprint
+        ng = bin_galaxies(geom, ra[1:1000], dec[1:1000], z[1:1000])
+        @test isapprox(sum(ng), 1000.0; rtol=1e-10)      # binning conserves count
+    end
+
 end
