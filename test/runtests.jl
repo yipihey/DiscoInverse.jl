@@ -175,4 +175,27 @@ end
         end
     end
 
+    @testset "NUTS + convergence diagnostics" begin
+        # R̂ / ESS on synthetic chains (deterministic)
+        M = reduce(vcat, [randn(MersenneTwister(c), 300)' for c in 1:4])        # iid
+        @test isapprox(rhat(M), 1.0; atol=0.05) && ess(M) > 700
+        S = reduce(vcat, [(randn(MersenneTwister(c), 300) .+ 5c)' for c in 1:4]) # offset means
+        @test rhat(S) > 2.0                                                     # flags non-convergence
+
+        c  = Cosmology("Planck18EEBAOSN"); pk = linear_power_spectrum(c)
+        res = 8; L = 300.0
+        gm = galaxy_model(res, L, c, pk; R=40.0, observer=[-1300.0, L/2, L/2],
+                          a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        W = ones(res,res,res); mask = ones(res,res,res); ntot = 15.0 * res^3
+        p0 = InferenceProblem{Float64, typeof(gm)}(gm, W, mask, zeros(res,res,res), ntot, [1.0,0,0], [1.0,1,1], 1e-6)
+        mock = inject_mock(p0, randn(MersenneTwister(0), res, res, res), [1.2, 0.3, 0.1]; ntot=ntot, seed=1)
+        if ad_ok
+            s = nuts_sample(mock, zeros(res,res,res), [1.0,0,0]; nsamples=30, nwarmup=40, max_depth=6, seed=0)
+            @test size(s.b_samples) == (30, 3)
+            @test 0.4 < s.accept < 1.0                       # auto-tuned acceptance near target
+            @test all(isfinite, s.b_mean) && all(s.b_std .< 5)
+            @test all(1 .<= s.depths .<= 6)                  # tree depth within bound
+        end
+    end
+
 end

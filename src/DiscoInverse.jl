@@ -65,6 +65,8 @@ export map_optimize, map_optimize_alternating, adam_optimize
 include("infer/driver.jl")
 export hmc_sample
 include("infer/hmc.jl")
+export nuts_sample, nuts_chains, rhat, ess
+include("infer/nuts.jl")
 
 # ── Validation: mock injection + recovery diagnostics ─────────────────────────
 export inject_mock, model_lambda, overall_correlation, cross_spectrum_r
