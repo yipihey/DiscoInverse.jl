@@ -71,6 +71,22 @@ end
                 @test isapprox(gb[k], gfd; rtol=1e-5)
             end
         end
+
+        # 1LPT (Zel'dovich) and 2LPT also run and are differentiable (fast paths).
+        for nord in (1, 2)
+            gmk = galaxy_model(res, L, c, pk; R=20.0, observer=[-1400.0, L/2, L/2],
+                               a_far=0.4, a_near=1.0, n_order=nord, n_sub=1, rsd=true)
+            ngk = galaxy_density(gmk, ω, b)
+            @test size(ngk) == (res, res, res)
+            @test isapprox(mean(ngk), 1.0; atol=0.1)
+            if ad_ok
+                lk(w) = sum(abs2, galaxy_density(gmk, w, b))
+                gk = Zygote.gradient(lk, ω)[1]
+                gfd = FiniteDifferences.grad(central_fdm(5, 1),
+                          t -> (u = copy(ω); u[2,3,4] = t; lk(u)), ω[2,3,4])[1]
+                @test isapprox(gk[2,3,4], gfd; rtol=1e-3)
+            end
+        end
     end
 
     @testset "Geometry + window (synthetic footprint)" begin
