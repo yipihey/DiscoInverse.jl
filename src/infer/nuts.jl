@@ -23,7 +23,9 @@ using Statistics: mean, std, var
 struct _PP{A,V}
     ω::A; b::V; pω::A; pb::V; gω::A; gb::V; U::Float64
 end
-_kin(pt::_PP, mb) = 0.5 * (sum(abs2, pt.pω) + mb * sum(abs2, pt.pb))
+# `mb` is the bias block's inverse mass M_b⁻¹ (3-vector) — per-parameter so the tight b1
+# and the wide b2/bs2 mix on a common step.  Field block has unit mass (M⁻¹=1).
+_kin(pt::_PP, mb) = 0.5 * (sum(abs2, pt.pω) + sum(mb .* pt.pb .^ 2))
 _ham(pt::_PP, mb) = pt.U + _kin(pt, mb)
 
 # one leapfrog step of (signed) size ε; recomputes & caches the gradient at the new point
@@ -31,7 +33,7 @@ function _leap(prob, pt::_PP, ε, mb)
     pω = pt.pω .- (ε / 2) .* pt.gω
     pb = pt.pb .- (ε / 2) .* pt.gb
     ω  = pt.ω .+ ε .* pω
-    b  = pt.b .+ (ε * mb) .* pb
+    b  = pt.b .+ ε .* (mb .* pb)
     r  = Zygote.withgradient((x, y) -> loss(prob, x, y), ω, b)
     gω = r.grad[1]; gb = r.grad[2]
     pω = pω .- (ε / 2) .* gω
@@ -42,8 +44,8 @@ end
 # generalized no-U-turn: (Δq)·(M⁻¹ r) ≥ 0 at both ends  (M⁻¹ = 1 for ω, mb for b)
 function _no_uturn(minus::_PP, plus::_PP, mb)
     Δω = plus.ω .- minus.ω; Δb = plus.b .- minus.b
-    cm = sum(Δω .* minus.pω) + mb * sum(Δb .* minus.pb)
-    cp = sum(Δω .* plus.pω)  + mb * sum(Δb .* plus.pb)
+    cm = sum(Δω .* minus.pω) + sum(mb .* Δb .* minus.pb)
+    cp = sum(Δω .* plus.pω)  + sum(mb .* Δb .* plus.pb)
     return (cm >= 0) && (cp >= 0)
 end
 
@@ -76,10 +78,11 @@ function _build_tree(prob, pt::_PP, logu, v, j, ε, H0, mb, rng)
 end
 
 # one NUTS transition from `pt0` (whose grad/U are cached); returns (new_pt, accept_stat, depth, ndiv)
-function _nuts_step(prob, pt0::_PP, ε, b_mass, max_depth, rng)
-    mb = 1 / b_mass
+# `Mb` is the bias mass (3-vector M_b); mb = M_b⁻¹, momentum pb ~ N(0, M_b).
+function _nuts_step(prob, pt0::_PP, ε, Mb, max_depth, rng)
+    mb = 1 ./ Mb
     pω = similar(pt0.ω); _fill_randn!(rng, pω)
-    pb = randn(rng, 3) .* sqrt(b_mass)
+    pb = randn(rng, 3) .* sqrt.(Mb)
     pt = _PP(pt0.ω, pt0.b, pω, pb, pt0.gω, pt0.gb, pt0.U)
     H0 = _ham(pt, mb)
     logu = log(rand(rng)) - H0
@@ -112,10 +115,11 @@ Single NUTS chain over (ω, b).  Returns `(; b_samples, b_mean, b_std, ω_mean, 
 """
 function nuts_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::AbstractVector;
                      nsamples::Int=400, nwarmup::Int=300, max_depth::Int=8,
-                     b_mass::Real=25.0, target_accept::Real=0.8, ε0::Real=0.05,
+                     b_mass=25.0, target_accept::Real=0.8, ε0::Real=0.05,
                      keep_fields::Int=5, seed::Int=0, show_every::Int=0) where {T}
     rng = MersenneTwister(seed)
     ω = copy(ω0); b = collect(float.(b0))
+    Mb = b_mass isa Number ? fill(float(b_mass), 3) : collect(float.(b_mass))   # per-param bias mass
     r0 = Zygote.withgradient((x, y) -> loss(prob, x, y), ω, b)
     pt = _PP(ω, b, similar(ω), b .* 0, r0.grad[1], r0.grad[2], r0.val)
 
@@ -129,7 +133,7 @@ function nuts_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::Abstra
 
     for m in 1:total
         ε = exp(logε)
-        ptnew, astat, depth, nd = _nuts_step(prob, pt, ε, b_mass, max_depth, rng)
+        ptnew, astat, depth, nd = _nuts_step(prob, pt, ε, Mb, max_depth, rng)
         pt = ptnew; ndiv += nd; m > nwarmup && (αsum += astat)
         if m <= nwarmup
             H̄ = (1 - 1/(m + t0)) * H̄ + (1/(m + t0)) * (target_accept - astat)
