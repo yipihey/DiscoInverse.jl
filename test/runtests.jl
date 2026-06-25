@@ -92,4 +92,28 @@ end
         @test isapprox(sum(ng), 1000.0; rtol=1e-10)      # binning conserves count
     end
 
+    @testset "Injection-recovery (field-level IC)" begin
+        cosmo = fiducial_cosmology(); pk = linear_power_spectrum(cosmo)
+        res = 12; L = 400.0; obs = [-1300.0, L/2, L/2]
+        gm = galaxy_model(res, L, cosmo, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0,
+                          n_order=3, n_sub=1, rsd=false)
+        W = ones(res, res, res); mask = ones(res, res, res)
+        ntot = 20.0 * res^3                              # ample signal (mean 20/cell)
+        probt = InferenceProblem{Float64, typeof(gm)}(gm, W, mask, zeros(res, res, res),
+                    ntot, [1.8, 0.0, 0.0], [5.0, 5.0, 5.0], 1e-6)
+        ωtrue = randn(MersenneTwister(42), res, res, res); btrue = [1.8, 0.4, 0.2]
+        prob = inject_mock(probt, ωtrue, btrue; ntot=ntot, seed=7)
+        if ad_ok   # map_optimize needs Zygote (Optim is a hard dep)
+            ω0 = zeros(res, res, res); b0 = [1.5, 0.0, 0.0]
+            L0 = loss(prob, ω0, b0)
+            rec = map_optimize(prob, ω0, b0; iters=60)
+            @test rec.loss < L0                          # optimizer reduced the loss
+            # large-scale initial-condition modes recovered (the BORG diagnostic);
+            # high-k modes are data-uninformative so r(k) declines there.
+            rk = cross_spectrum_r(rec.ω, ωtrue; nbins=5, boxsize=L)
+            @test rk.r[1] > 0.8
+            @test rk.r[2] > 0.5
+        end
+    end
+
 end

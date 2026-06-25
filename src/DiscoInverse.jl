@@ -47,4 +47,20 @@ include("geometry/embedding.jl")
 export survey_window, bin_galaxies
 include("window/window.jl")
 
+# ── Likelihood + prior + loss ─────────────────────────────────────────────────
+export poisson_nll, overdispersed_nll, gaussian_prior, bias_prior
+include("likelihood/poisson.jl")
+include("likelihood/prior.jl")
+export InferenceProblem, inference_problem, galaxy_model_for, prov_weights, model_density, loss
+include("likelihood/loss.jl")
+
+# ── Inference driver ──────────────────────────────────────────────────────────
+export map_optimize, map_optimize_alternating
+include("infer/driver.jl")
+
+# ── Validation: mock injection + recovery diagnostics ─────────────────────────
+export inject_mock, model_lambda, overall_correlation, cross_spectrum_r
+include("validation/mock.jl")
+include("validation/diagnostics.jl")
+
 end # module
