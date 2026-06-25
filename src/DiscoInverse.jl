@@ -63,6 +63,8 @@ include("likelihood/loss.jl")
 # ── Inference driver ──────────────────────────────────────────────────────────
 export map_optimize, map_optimize_alternating, adam_optimize
 include("infer/driver.jl")
+export hmc_sample
+include("infer/hmc.jl")
 
 # ── Validation: mock injection + recovery diagnostics ─────────────────────────
 export inject_mock, model_lambda, overall_correlation, cross_spectrum_r

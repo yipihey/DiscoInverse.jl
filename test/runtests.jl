@@ -158,4 +158,21 @@ end
         end
     end
 
+    @testset "Joint (ω,b) HMC sampler" begin
+        res = 10; L = 350.0
+        c  = Cosmology("Planck18EEBAOSN"); pk = linear_power_spectrum(c)
+        gm = galaxy_model(res, L, c, pk; R=40.0, observer=[-1300.0, L/2, L/2],
+                          a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        W = ones(res, res, res); mask = ones(res, res, res); ntot = 15.0 * res^3
+        prob0 = InferenceProblem{Float64, typeof(gm)}(gm, W, mask, zeros(res,res,res), ntot, [1.0,0,0], [1.0,1,1], 1e-6)
+        mock = inject_mock(prob0, randn(MersenneTwister(0), res, res, res), [1.2, 0.3, 0.1]; ntot=ntot, seed=1)
+        if ad_ok
+            s = hmc_sample(mock, zeros(res,res,res), [1.0,0,0]; nsamples=40, nwarmup=60, nleap=12, seed=0)
+            @test size(s.b_samples) == (40, 3)
+            @test 0.3 < s.accept < 1.0                       # leapfrog + dual-averaging healthy
+            @test all(isfinite, s.b_mean) && all(s.b_std .< 5) # bounded posterior (NOT the MAP runaway)
+            @test size(s.ω_mean) == (res, res, res)
+        end
+    end
+
 end
