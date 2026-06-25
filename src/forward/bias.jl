@@ -60,7 +60,7 @@ function bias_fields(fphi::AbstractArray{Complex{T},3}, ops::BiasOperators{T}) w
     δL  = _irfftn(fdL, res)
     sxx = _irfftn(ops.kxkx .* fdL, res) .- δL ./ 3
     syy = _irfftn(ops.kyky .* fdL, res) .- δL ./ 3
-    szz = _irfftn(ops.kzkz .* fdL, res) .- δL ./ 3
+    szz = .-(sxx .+ syy)                           # tidal tensor is trace-free → no 7th irfft
     sxy = _irfftn(ops.kxky .* fdL, res)
     sxz = _irfftn(ops.kxkz .* fdL, res)
     syz = _irfftn(ops.kykz .* fdL, res)
