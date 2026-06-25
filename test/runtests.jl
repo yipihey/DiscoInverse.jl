@@ -129,6 +129,13 @@ end
             rk = cross_spectrum_r(rec.ω, ωtrue; nbins=5, boxsize=L)
             @test rk.r[1] > 0.8
             @test rk.r[2] > 0.5
+
+            # Adam driver (the device-resident path the GPU optimizer uses) also reduces
+            # the loss and recovers the large-scale modes.
+            ra = adam_optimize(prob, ω0, b0; iters=80, lr=0.05)
+            @test ra.loss < L0
+            @test ra.history[end] < ra.history[1]
+            @test cross_spectrum_r(ra.ω, ωtrue; nbins=5, boxsize=L).r[1] > 0.7
         end
     end
 

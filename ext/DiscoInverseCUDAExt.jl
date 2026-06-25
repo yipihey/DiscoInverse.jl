@@ -10,7 +10,7 @@ KA atomic-scatter deposit) — ~30× the CPU forward, ~33× the gradient (res=64
 module DiscoInverseCUDAExt
 
 using DiscoInverse
-using DiscoInverse: GalaxyModel, BiasOperators
+using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem
 using DiscoDJNative
 using CUDA
 
@@ -27,6 +27,15 @@ function DiscoInverse.gpu(gm::GalaxyModel{T}) where {T}
     return GalaxyModel{T, typeof(op), typeof(K), typeof(ops), typeof(gm.cosmo)}(
         gm.res, gm.boxsize, gm.n_order, gm.n_sub, gm.rsd, gm.a_far, gm.a_near,
         op, K, ops, qf, gm.observer, gm.cosmo, gm.sigma2, gm.s2mean)
+end
+
+# Move the whole inference problem to the device: GPU forward + the data fields
+# (window/mask/counts) as CuArrays, so `adam_optimize(gpu(prob), CuArray(ω0), b0)` runs
+# the entire MAP loop on the A6000.  The bias prior (3 params) stays on the host.
+function DiscoInverse.gpu(prob::InferenceProblem{T}) where {T}
+    gmg = DiscoInverse.gpu(prob.gm)
+    return InferenceProblem{T, typeof(gmg)}(gmg, CuArray(prob.W), CuArray(prob.mask),
+        CuArray(prob.n_obs), prob.ntot, prob.b0, prob.σb, prob.λfloor)
 end
 
 end # module

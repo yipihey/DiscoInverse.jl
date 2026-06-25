@@ -7,15 +7,18 @@ The inference problem: forward model + data + priors, with a single differentiab
 Gradients flow only to ω and the bias b; the cosmology and survey geometry are fixed.
 """
 
-struct InferenceProblem{T<:AbstractFloat, GM}
+struct InferenceProblem{T<:AbstractFloat, GM, A<:AbstractArray{T,3}}
     gm::GM                  # GalaxyModel (forward)
-    W::Array{T,3}           # survey window
-    mask::Array{T,3}        # footprint 0/1 (W>0)
-    n_obs::Array{T,3}       # binned data counts
+    W::A                    # survey window           (Array or CuArray — device-aware)
+    mask::A                 # footprint 0/1 (W>0)
+    n_obs::A                # binned data counts
     ntot::T
-    b0::Vector{T}; σb::Vector{T}   # bias prior
+    b0::Vector{T}; σb::Vector{T}   # bias prior (3 params, stays on host)
     λfloor::T
 end
+# Inner-type-eliding constructor: infer A from the arrays (so CuArrays aren't widened).
+InferenceProblem{T,GM}(gm, W, mask, n_obs, ntot, b0, σb, λfloor) where {T,GM} =
+    InferenceProblem{T,GM,typeof(W)}(gm, W, mask, n_obs, ntot, b0, σb, λfloor)
 
 """    galaxy_model_for(geom, pk_table; R, n_order=3, n_sub=1, rsd=false, ref_seed=0)"""
 function galaxy_model_for(geom::BoxGeometry, pk_table::Dict;

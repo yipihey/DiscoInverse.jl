@@ -60,7 +60,7 @@ export InferenceProblem, inference_problem, galaxy_model_for, prov_weights, mode
 include("likelihood/loss.jl")
 
 # ── Inference driver ──────────────────────────────────────────────────────────
-export map_optimize, map_optimize_alternating
+export map_optimize, map_optimize_alternating, adam_optimize
 include("infer/driver.jl")
 
 # ── Validation: mock injection + recovery diagnostics ─────────────────────────
