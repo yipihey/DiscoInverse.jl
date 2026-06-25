@@ -27,6 +27,11 @@ export white_noise_to_fphi, ic_operator, nlpt_kernels, compute_core_exact, compu
        lightcone_cross_ad, exact_shape_stack, Cosmology, linear_power_spectrum,
        comoving_distance, growth_D1
 
+# Move a forward model to the GPU (implemented in the CUDA extension).
+"""    gpu(gm::GalaxyModel) -> GalaxyModel on the device (requires `using CUDA`)"""
+gpu(::Any) = error("DiscoInverse.gpu requires the CUDA extension — run `using CUDA` first.")
+export gpu
+
 # ── Forward: 2nd-order Lagrangian bias ────────────────────────────────────────
 export BiasOperators, bias_operators, bias_fields, bias_weight, bias_moments
 include("forward/bias.jl")

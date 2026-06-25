@@ -31,7 +31,7 @@ struct GalaxyModel{T<:AbstractFloat, OP, KER, BOP, CO}
     op::OP
     K::KER
     ops::BOP
-    qflat::Matrix{T}
+    qflat::AbstractMatrix{T}     # Array or CuArray (device-aware)
     observer::Vector{T}
     cosmo::CO
     sigma2::T
@@ -78,11 +78,11 @@ function galaxy_density(gm::GalaxyModel{T}, ω::AbstractArray{T,3}, b) where {T}
     wg     = bias_weight(δL, s2, gm.sigma2, gm.s2mean; b1=b[1], b2=b[2], bs2=b[3])
     lc     = lightcone_cross_ad(Psi, gm.qflat, gm.cosmo, gm.observer, gm.a_far, gm.a_near; rsd=gm.rsd)
     x      = lc.x_obs
-    if gm.rsd
-        obsr = reshape(gm.observer, 1, 3)
-        d    = x .- obsr
-        rhat = d ./ max.(sqrt.(sum(abs2, d; dims=2)), T(1e-30))
-        x    = x .+ lc.v_r .* rhat                       # redshift-space radial shift
+    if gm.rsd                                            # redshift-space radial shift
+        o1, o2, o3 = T(gm.observer[1]), T(gm.observer[2]), T(gm.observer[3])   # scalars (GPU-safe)
+        d1 = x[:, 1] .- o1; d2 = x[:, 2] .- o2; d3 = x[:, 3] .- o3
+        s  = lc.v_r ./ max.(sqrt.(d1.^2 .+ d2.^2 .+ d3.^2), T(1e-30))
+        x  = hcat(x[:, 1] .+ s .* d1, x[:, 2] .+ s .* d2, x[:, 3] .+ s .* d3)
     end
     xg = reshape(x, gm.res, gm.res, gm.res, 3)
     return sheet_deposit(xg, wg, gm.res, gm.boxsize; n_sub=gm.n_sub)

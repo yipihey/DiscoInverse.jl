@@ -45,7 +45,8 @@ function bias_operators(res::Int, boxsize::Real, R::Real; T::Type{<:AbstractFloa
     return bias
 end
 
-_irfftn(f, res) = irfft(f, res, [3, 1, 2])
+# Device-aware irfft (CPU [3,1,2]; CuArray permute-wrapped via the DiscoDJNative ext).
+_irfftn(f, res) = DiscoDJNative._irfftn(f, res)
 
 """
     bias_fields(fphi, ops) -> (δ_L, s²)
