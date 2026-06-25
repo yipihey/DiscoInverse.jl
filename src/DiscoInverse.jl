@@ -56,7 +56,8 @@ include("window/window.jl")
 export poisson_nll, overdispersed_nll, gaussian_prior, bias_prior
 include("likelihood/poisson.jl")
 include("likelihood/prior.jl")
-export InferenceProblem, inference_problem, galaxy_model_for, prov_weights, model_density, loss
+export InferenceProblem, inference_problem, inference_problem_overdispersed,
+       galaxy_model_for, prov_weights, model_density, loss
 include("likelihood/loss.jl")
 
 # ── Inference driver ──────────────────────────────────────────────────────────

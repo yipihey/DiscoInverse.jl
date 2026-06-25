@@ -139,4 +139,23 @@ end
         end
     end
 
+    @testset "Over-dispersed PROV likelihood" begin
+        res = 8; L = 300.0
+        c  = Cosmology("Planck18EEBAOSN"); pk = linear_power_spectrum(c)
+        gm = galaxy_model(res, L, c, pk; R=20.0, observer=[-1400.0, L/2, L/2],
+                          a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        ω = randn(MersenneTwister(3), res, res, res); b = [1.5, 0.0, 0.0]
+        W = ones(res, res, res); mask = ones(res, res, res)
+        nobs = fill(5.0, res, res, res); dvar = fill(2.0, res, res, res)   # synthetic Var_miss
+        pod = InferenceProblem{Float64, typeof(gm)}(gm, W, mask, nobs, sum(nobs), b, [5.0,5,5], 1e-6, dvar)
+        ppo = InferenceProblem{Float64, typeof(gm)}(gm, W, mask, nobs, sum(nobs), b, [5.0,5,5], 1e-6)
+        Lod = loss(pod, ω, b)
+        @test isfinite(Lod) && Lod != loss(ppo, ω, b)     # over-dispersed branch active + distinct
+        if ad_ok
+            g = Zygote.gradient(w -> loss(pod, w, b), ω)[1]
+            gfd = FiniteDifferences.grad(central_fdm(5,1), t -> (u=copy(ω); u[2,3,4]=t; loss(pod,u,b)), ω[2,3,4])[1]
+            @test isapprox(g[2,3,4], gfd; rtol=1e-3)       # over-dispersed NLL is differentiable
+        end
+    end
+
 end

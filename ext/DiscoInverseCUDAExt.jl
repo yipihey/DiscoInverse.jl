@@ -34,8 +34,9 @@ end
 # the entire MAP loop on the A6000.  The bias prior (3 params) stays on the host.
 function DiscoInverse.gpu(prob::InferenceProblem{T}) where {T}
     gmg = DiscoInverse.gpu(prob.gm)
+    dv  = prob.data_var === nothing ? nothing : CuArray(prob.data_var)
     return InferenceProblem{T, typeof(gmg)}(gmg, CuArray(prob.W), CuArray(prob.mask),
-        CuArray(prob.n_obs), prob.ntot, prob.b0, prob.σb, prob.λfloor)
+        CuArray(prob.n_obs), prob.ntot, prob.b0, prob.σb, prob.λfloor, dv)
 end
 
 end # module
