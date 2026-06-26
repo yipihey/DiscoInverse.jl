@@ -10,6 +10,7 @@ and b (3) are optimised jointly on a flat vector; for stiff problems use
 
 using Zygote
 using Optim
+using DiscoDJNative: upsample_white_noise
 
 # Flatten / unflatten (ω, b) ↔ a single vector for Optim.
 _flat(ω, b) = vcat(vec(ω), b)
@@ -50,6 +51,39 @@ function map_optimize(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
     ωh = reshape(vmin[1:N], res, res, res)
     bh = fix_bias ? bfix : vmin[N+1:end]
     return (ω=ωh, b=bh, loss=Optim.minimum(r), result=r)
+end
+
+"""
+    progressive_optimize(build_problem, schedule, b0; iters=30, optimizer=adam_optimize,
+                         device=identity, T=Float64, fix_bias=true, kw...)
+        -> (; ω, b, levels)
+
+Coarse→fine warm-started MAP.  Optimise ω at each resolution in `schedule` (e.g.
+`[32,64,128]`), upsampling ω between levels with the MUSIC white-noise construction
+([`upsample_white_noise`](@ref)) so each finer level starts from the previous level's
+large-scale solution and only fills in the new high-k modes — fixing the large scales first,
+where the forward is cheap.  `build_problem(res)` returns a problem at that resolution (the
+galaxies/data are fixed; only the model grid changes).  `device` moves the host ω to the
+problem's backend (`CuArray` for a `gpu(...)` problem, `identity` for CPU); ω is kept on the
+host between levels for the (host) upsample.  `optimizer` is `adam_optimize` (GPU-resident)
+or `map_optimize` (L-BFGS).  Extra `kw...` pass through to the optimizer (e.g. `lr`).
+
+NB the coarse levels need an optimizer that actually converges the shallow point-process
+basin (L-BFGS, or well-tuned Adam) for the warm start to carry real signal — a plain Adam
+can overshoot at coarse resolution and weaken the head-start.
+"""
+function progressive_optimize(build_problem, schedule::AbstractVector{<:Integer}, b0;
+                              iters::Int=30, optimizer=adam_optimize, device=identity,
+                              T::Type=Float64, fix_bias::Bool=true, kw...)
+    ωh = nothing; bh = collect(float.(b0)); levels = NamedTuple[]
+    for (lvl, res) in enumerate(schedule)
+        prob = build_problem(res)
+        ωh_init = lvl == 1 ? zeros(T, res, res, res) : upsample_white_noise(ωh, res)
+        out = optimizer(prob, device(ωh_init), bh; iters=iters, fix_bias=fix_bias, kw...)
+        ωh = Array(out.ω); bh = collect(out.b)
+        push!(levels, (res=res, loss=out.loss))
+    end
+    return (ω=ωh, b=bh, levels=levels)
 end
 
 """
