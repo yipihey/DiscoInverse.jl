@@ -116,7 +116,8 @@ Single NUTS chain over (ω, b).  Returns `(; b_samples, b_mean, b_std, ω_mean, 
 function nuts_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::AbstractVector;
                      nsamples::Int=400, nwarmup::Int=300, max_depth::Int=8,
                      b_mass=25.0, target_accept::Real=0.8, ε0::Real=0.05,
-                     keep_fields::Int=5, seed::Int=0, show_every::Int=0, gc_every::Int=10) where {T}
+                     keep_fields::Int=5, seed::Int=0, show_every::Int=0, gc_every::Int=10,
+                     reclaim=() -> nothing) where {T}
     rng = MersenneTwister(seed)
     ω = copy(ω0); b = collect(float.(b0))
     Mb = b_mass isa Number ? fill(float(b_mass), 3) : collect(float.(b_mass))   # per-param bias mass
@@ -135,10 +136,11 @@ function nuts_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::Abstra
         ε = exp(logε)
         ptnew, astat, depth, nd = _nuts_step(prob, pt, ε, Mb, max_depth, rng)
         pt = ptnew; ndiv += nd; m > nwarmup && (αsum += astat)
-        # Force GC periodically: each NUTS draw churns through ~2^depth leapfrog gradients,
-        # and Julia's lazy GC lets the CUDA pool balloon far past the live working set
-        # (the 31→45 GB we saw).  An incremental collect returns freed blocks to the pool.
-        gc_every > 0 && m % gc_every == 0 && GC.gc(false)
+        # Cap the CUDA pool: each NUTS draw churns ~2^depth leapfrog gradients, and Julia's
+        # lazy GC lets the pool balloon far past the ~live working set (the 31→45 GB we saw).
+        # A full collect + caller-injected `reclaim` (e.g. CUDA.reclaim) returns freed blocks
+        # all the way to the driver, holding the run at its live footprint (~5 GB res96).
+        gc_every > 0 && m % gc_every == 0 && (GC.gc(); reclaim())
         if m <= nwarmup
             H̄ = (1 - 1/(m + t0)) * H̄ + (1/(m + t0)) * (target_accept - astat)
             logε = μ - sqrt(m) / γ * H̄
