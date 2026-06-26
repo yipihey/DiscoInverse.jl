@@ -35,10 +35,14 @@ function _sheet_inputs(gm::GalaxyModel{T}, ω::AbstractArray{T,3}, b) where {T}
     return reshape(x, gm.res, gm.res, gm.res, 3), wg
 end
 
-# Fold the survey window into the per-vertex weight: w(q) ← bias(q)·W(q).  W is the (fixed,
-# Lagrangian) footprint mask, so the normalization Z = Σ_T m_T w_T integrates only over the
-# observed volume and the gradient vanishes outside the footprint (no data there).
-@inline _apply_window(wg, window) = window === nothing ? wg : wg .* window
+# Per-vertex weight w(q) ← max(bias(q), 0)·W(q):
+#   - clip the linear bias 1+b₁δ_L+… at 0 — it goes negative in deep voids (δ_L < −1/b₁), which
+#     would make ρ_g and the normalization Z negative (unphysical; log Z throws). Galaxies sit in
+#     over-densities so this only touches empty voids; the loss's ρ_g-floor handles any galaxy there.
+#   - W is the (fixed) footprint window, so Z = Σ_T m_T w_T integrates only over the observed
+#     volume and the gradient vanishes outside the footprint (no data there).
+@inline _apply_window(wg, window) =
+    (w = max.(wg, zero(eltype(wg))); window === nothing ? w : w .* window)
 
 """    galaxy_density_sheet(gm, ω, b, pts, cl; floor_frac=1e-3, window=nothing) -> (ρ_g::(N,), Z)"""
 function galaxy_density_sheet(gm::GalaxyModel, ω, b, pts, cl; floor_frac::Real=1e-3, window=nothing)
