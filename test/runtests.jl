@@ -255,4 +255,26 @@ end
         end
     end
 
+    @testset "Survey window in sheet normalization (P7)" begin
+        c  = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
+        gm = galaxy_model(res, L, c, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        ωstar = randn(MersenneTwister(1), res,res,res); bstar = [1.5, 0.0, 0.0]
+        pts = inject_mock_sheet(gm, ωstar, bstar, 25.0*res^3; seed=2)
+        win = zeros(res,res,res); win[2:6, 2:6, 2:6] .= 1.0            # a sub-box footprint
+        p0 = sheet_problem(gm, pts; b0=[1.5,0,0], σb=[5.,5,5])           # no window
+        p1 = sheet_problem(gm, pts; b0=[1.5,0,0], σb=[5.,5,5], window=ones(res,res,res))
+        pW = sheet_problem(gm, pts; b0=[1.5,0,0], σb=[5.,5,5], window=win)
+        ω0 = zeros(res,res,res)
+        @test loss(p1, ω0, [1.5,0,0]) ≈ loss(p0, ω0, [1.5,0,0])         # window=ones ≡ no window
+        @test isfinite(loss(pW, ω0, [1.5,0,0]))
+        Z0 = galaxy_density_sheet_c0(gm, ω0, [1.5,0,0], pW.pts, pW.cl)[2]
+        ZW = galaxy_density_sheet_c0(gm, ω0, [1.5,0,0], pW.pts, pW.cl; window=win)[2]
+        @test ZW < Z0                                                   # window shrinks the normalization
+        if ad_ok
+            g = Zygote.gradient(w -> loss(pW, w, [1.5,0,0]), ω0)[1]
+            @test all(isfinite, g)
+        end
+    end
+
 end

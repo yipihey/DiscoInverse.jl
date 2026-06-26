@@ -45,8 +45,9 @@ end
 # backend per call anyway (`mv` in sheet_density.jl); the bias 3-vectors stay on the host.
 function DiscoInverse.gpu(prob::SheetProblem{T}) where {T}
     gmg = DiscoInverse.gpu(prob.gm); ug = CuArray(prob.u)
-    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug)}(
-        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0)
+    win = prob.window === nothing ? nothing : CuArray(prob.window)
+    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug), typeof(win)}(
+        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0, win)
 end
 
 end # module
