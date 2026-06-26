@@ -39,3 +39,4 @@ function prov_mask(cat::EchoesCatalog, group::Symbol)
     group === :all       ? trues(length(cat.prov)) :
     error("group must be :observed, :completed, or :all")
 end
+# `prov_weights(cat; soft)` (PROV=0 → 1, PROV≥1 → soft) lives in likelihood/loss.jl.

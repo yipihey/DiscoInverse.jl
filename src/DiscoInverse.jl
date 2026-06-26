@@ -42,7 +42,7 @@ export GalaxyModel, galaxy_model, galaxy_density
 include("forward/galaxy_field.jl")
 
 # ── ECHOES data IO ────────────────────────────────────────────────────────────
-export EchoesCatalog, load_echoes_realization, load_echoes_randoms, n_realizations, prov_mask
+export EchoesCatalog, load_echoes_realization, load_echoes_randoms, n_realizations, prov_mask, prov_weights
 include("data/echoes_io.jl")
 
 # ── Geometry: wedge → comoving box ────────────────────────────────────────────

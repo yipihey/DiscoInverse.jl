@@ -255,6 +255,13 @@ end
         end
     end
 
+    @testset "PROV per-galaxy weights (P7)" begin
+        cat = EchoesCatalog([10.0,11,12,13], [0.0,1,2,3], [0.5,0.5,0.5,0.5], Int8[0,1,2,3])
+        u = prov_weights(cat; soft=0.4)
+        @test u == [1.0, 0.4, 0.4, 0.4]                 # PROV=0 observed (hard); PROV≥1 soft
+        @test eltype(u) == Float64
+    end
+
     @testset "Redshift-space distortions (sheet, P7)" begin
         c  = fiducial_cosmology(); pk = linear_power_spectrum(c)
         res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
