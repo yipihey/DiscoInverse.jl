@@ -24,7 +24,7 @@ end
 
 Joint MAP over (ω, b).  `fix_bias=true` optimises ω only (b held at b0).
 """
-function map_optimize(prob::InferenceProblem{T}, ω0::AbstractArray{T,3}, b0::AbstractVector;
+function map_optimize(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
                       iters::Int=100, method=Optim.LBFGS(), show_trace::Bool=false,
                       fix_bias::Bool=false) where {T}
     res = prob.gm.res; N = res^3

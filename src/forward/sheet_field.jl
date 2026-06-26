@@ -35,10 +35,22 @@ function _sheet_inputs(gm::GalaxyModel{T}, ω::AbstractArray{T,3}, b) where {T}
     return reshape(x, gm.res, gm.res, gm.res, 3), wg
 end
 
-"""    galaxy_density_sheet(gm, ω, b, pts, cl; floor_frac=1e-3) -> (ρ_g::(N,), Z)"""
+"""    galaxy_density_sheet(gm, ω, b, pts, cl; floor_frac=1e-3) -> (ρ_g::(N,), Z)  [piecewise-constant]"""
 function galaxy_density_sheet(gm::GalaxyModel, ω, b, pts, cl; floor_frac::Real=1e-3)
     xg, wg = _sheet_inputs(gm, ω, b)
     return sheet_density_at_points(xg, wg, pts, cl, gm.res, gm.boxsize; floor_frac=floor_frac)
+end
+
+"""    galaxy_density_sheet_c0(gm, ω, b, pts, cl; floor_frac=1e-3) -> (ρ_g, Z)  [C⁰ nodal-averaged]
+
+Continuous density: vertex densities `ρ_v` (nodal_density) then barycentric interpolation at
+the galaxies (interp_sheet_at_points).  Continuous across tet faces ⇒ the loss is smoothly
+optimizable, where the piecewise-constant version is not (P5 finding)."""
+function galaxy_density_sheet_c0(gm::GalaxyModel, ω, b, pts, cl; floor_frac::Real=1e-3)
+    xg, wg = _sheet_inputs(gm, ω, b)
+    ρv, Z = nodal_density(xg, wg, gm.res, gm.boxsize; floor_frac=floor_frac)
+    ρg = interp_sheet_at_points(xg, ρv, pts, cl, gm.res)
+    return (ρg, Z)
 end
 
 struct SheetProblem{T<:AbstractFloat, GM, P, C}
@@ -50,28 +62,32 @@ struct SheetProblem{T<:AbstractFloat, GM, P, C}
     b0::Vector{T}; σb::Vector{T}
     ρfloor::T               # floor for log ρ_g (galaxies in no tet)
     floor_frac::T           # caustic floor: |V_T| ≥ floor_frac·V_Lagrangian (caps ρ_T)
+    c0::Bool                # C⁰ nodal-averaged density (true, optimizable) vs piecewise-constant
 end
 
-"""    sheet_problem(gm, pts; u, b0, σb, ρfloor=1e-8, floor_frac=1e-3, h=cell) -> SheetProblem"""
+"""    sheet_problem(gm, pts; u, b0, σb, ρfloor=1e-8, floor_frac=1e-3, c0=true, h=cell) -> SheetProblem"""
 function sheet_problem(gm::GalaxyModel{T}, pts::AbstractMatrix; u=nothing,
                        b0=[1.0,0,0], σb=[5.0,5,5], ρfloor::Real=1e-8, floor_frac::Real=1e-3,
-                       h=nothing) where {T}
+                       c0::Bool=true, h=nothing) where {T}
     P = T.(pts); hh = h === nothing ? gm.boxsize/gm.res : T(h)
     cl = build_cell_list(P, hh)
     uu = u === nothing ? ones(T, size(P,1)) : Vector{T}(u)
     return SheetProblem{T, typeof(gm), typeof(P), typeof(cl)}(gm, P, cl, uu, sum(uu),
-                          Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac))
+                          Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac), c0)
 end
+
+_sheet_dens(prob::SheetProblem, ω, b) = prob.c0 ?
+    galaxy_density_sheet_c0(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac) :
+    galaxy_density_sheet(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac)
 
 """    loss(prob::SheetProblem, ω, b) -> −Σ u_g log ρ_g + U log Z + priors  (Zygote entry point)"""
 function loss(prob::SheetProblem, ω, b)
-    ρg, Z = galaxy_density_sheet(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac)
+    ρg, Z = _sheet_dens(prob, ω, b)
     return -sum(prob.u .* log.(max.(ρg, prob.ρfloor))) + prob.Utot * log(Z) +
            gaussian_prior(ω) + bias_prior(b, prob.b0, prob.σb)
 end
 
-model_density(prob::SheetProblem, ω, b) =
-    galaxy_density_sheet(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac)[1]
+model_density(prob::SheetProblem, ω, b) = _sheet_dens(prob, ω, b)[1]
 
 """
     inject_mock_sheet(gm, ω*, b*, ntot; seed=0) -> pts::(N,3)
