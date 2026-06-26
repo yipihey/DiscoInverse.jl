@@ -10,6 +10,7 @@ and b (3) are optimised jointly on a flat vector; for stiff problems use
 
 using Zygote
 using Optim
+using LinearAlgebra: dot
 using DiscoDJNative: upsample_white_noise
 
 # Flatten / unflatten (ω, b) ↔ a single vector for Optim.
@@ -51,6 +52,49 @@ function map_optimize(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
     ωh = reshape(vmin[1:N], res, res, res)
     bh = fix_bias ? bfix : vmin[N+1:end]
     return (ω=ωh, b=bh, loss=Optim.minimum(r), result=r)
+end
+
+"""
+    lbfgs_optimize(prob, ω0, b0; iters=50, m=10, fix_bias=true, c1=1e-4, ρ=0.5, max_ls=20)
+        -> (; ω, b, loss, history)
+
+GPU-resident L-BFGS over the white-noise field ω (bias held at `b0`).  The two-loop
+recursion and the Armijo backtracking line search are all device vector ops — the dot
+products sync only a scalar, the loss/gradient run on the backend of `ω0` — so unlike
+`map_optimize` (Optim on a host vector) the whole optimization stays on the GPU.  The line
+search guarantees monotone decrease, so it CONVERGES the shallow point-process basin where
+Adam overshoots (the coarse-resolution failure mode).  History `m` pairs (≈20·res³, tiny vs
+the forward tape).
+"""
+function lbfgs_optimize(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
+                        iters::Int=50, m::Int=10, fix_bias::Bool=true,
+                        c1::Real=1e-4, ρ::Real=0.5, max_ls::Int=20, kw...) where {T}
+    fix_bias || error("lbfgs_optimize optimizes ω only (pass fix_bias=true)")
+    b = Vector{T}(b0)
+    f(w) = loss(prob, w, b)
+    g(w) = Zygote.gradient(f, w)[1]
+    ω = copy(ω0); fω = f(ω); gω = g(ω)
+    S = typeof(ω)[]; Y = typeof(ω)[]; ρs = T[]; hist = Float64[fω]
+    for _ in 1:iters
+        q = copy(gω); k = length(S); α = zeros(T, k)            # two-loop recursion → d = -H·g
+        for i in k:-1:1; α[i] = ρs[i]*dot(S[i], q); q .-= α[i].*Y[i]; end
+        γ = k == 0 ? one(T) : dot(S[end], Y[end]) / dot(Y[end], Y[end])
+        r = γ .* q
+        for i in 1:k; β = ρs[i]*dot(Y[i], r); r .+= (α[i]-β).*S[i]; end
+        d = .-r; gd = dot(gω, d)
+        gd ≥ 0 && (d = .-gω; gd = dot(gω, d))                   # safeguard: steepest descent
+        a = one(T); ωn = ω .+ a.*d; fn = f(ωn); ls = 0          # Armijo backtracking
+        while fn > fω + c1*a*gd && ls < max_ls
+            a *= T(ρ); ωn = ω .+ a.*d; fn = f(ωn); ls += 1
+        end
+        gn = g(ωn); s = ωn .- ω; y = gn .- gω; sy = dot(s, y)
+        if sy > eps(T)                                          # curvature ⇒ store pair
+            push!(S, s); push!(Y, y); push!(ρs, one(T)/sy)
+            length(S) > m && (popfirst!(S); popfirst!(Y); popfirst!(ρs))
+        end
+        ω = ωn; fω = fn; gω = gn; push!(hist, fω)
+    end
+    return (ω=ω, b=b, loss=fω, history=hist)
 end
 
 """

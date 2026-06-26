@@ -62,7 +62,7 @@ export InferenceProblem, inference_problem, inference_problem_overdispersed,
 include("likelihood/loss.jl")
 
 # ── Inference driver ──────────────────────────────────────────────────────────
-export map_optimize, map_optimize_alternating, adam_optimize, progressive_optimize
+export map_optimize, map_optimize_alternating, adam_optimize, lbfgs_optimize, progressive_optimize
 export upsample_white_noise
 include("infer/driver.jl")
 export hmc_sample
