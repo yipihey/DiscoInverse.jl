@@ -255,6 +255,29 @@ end
         end
     end
 
+    @testset "Redshift-space distortions (sheet, P7)" begin
+        c  = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
+        gmR = galaxy_model(res, L, c, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        gmS = galaxy_model(res, L, c, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0, n_order=1, rsd=true)
+        ωstar = randn(MersenneTwister(1), res,res,res); bstar = [1.5, 0.0, 0.0]
+        pts = inject_mock_sheet(gmR, ωstar, bstar, 25.0*res^3; seed=2)
+        prob = sheet_problem(gmR, pts; b0=[1.5,0,0], σb=[5.,5,5])
+        ρr, _ = galaxy_density_sheet_c0(gmR, ωstar, bstar, prob.pts, prob.cl)
+        ρs, _ = galaxy_density_sheet_c0(gmS, ωstar, bstar, prob.pts, prob.cl)
+        @test !isapprox(ρs, ρr; rtol=1e-3)             # RSD shifts the sheet ⇒ LOS density anisotropy
+        probS = sheet_problem(gmS, pts; b0=[1.5,0,0], σb=[5.,5,5])
+        @test isfinite(loss(probS, zeros(res,res,res), [1.5,0,0]))
+        if ad_ok                                        # the v_r path is differentiable w.r.t. ω
+            fdm = central_fdm(5,1); ω0 = zeros(res,res,res)
+            g = Zygote.gradient(w -> loss(probS, w, [1.5,0,0]), ω0)[1]
+            for idx in ((3,4,5),(6,2,7))
+                fd = FiniteDifferences.grad(fdm, t->(u=copy(ω0);u[idx...]=t;loss(probS,u,[1.5,0,0])), ω0[idx...])[1]
+                @test isapprox(g[idx...], fd; rtol=1e-3)
+            end
+        end
+    end
+
     @testset "Survey window in sheet normalization (P7)" begin
         c  = fiducial_cosmology(); pk = linear_power_spectrum(c)
         res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
