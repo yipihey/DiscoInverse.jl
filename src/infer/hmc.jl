@@ -55,7 +55,7 @@ function hmc_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::Abstrac
         _fill_randn!(rng, pω)                            # pω ~ N(0, I)
         pb = randn(rng, 3) .* sqrt(b_mass)               # pb ~ N(0, b_mass·I)
         ω0c = copy(ω); b0c = copy(b)
-        K0 = T(0.5) * sum(abs2, pω) + 0.5 * mb * sum(abs2, pb)
+        K0 = 0.5 * sum(x -> Float64(abs2(x)), pω) + 0.5 * mb * sum(abs2, pb)   # F64 accum
         H0 = val + K0
 
         gωc = gω; gbc = gb; valc = val
@@ -66,7 +66,7 @@ function hmc_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::Abstrac
             c = (s < L) ? ε : ε / 2                       # interior full kick / final half
             @. pω -= c * gωc; @. pb -= c * gbc
         end
-        K1 = T(0.5) * sum(abs2, pω) + 0.5 * mb * sum(abs2, pb)
+        K1 = 0.5 * sum(x -> Float64(abs2(x)), pω) + 0.5 * mb * sum(abs2, pb)   # F64 accum
         Δ = H0 - (valc + K1)
         diverged = !isfinite(Δ) || abs(Δ) > 1000
         α = diverged ? 0.0 : min(1.0, exp(Float64(Δ)))
