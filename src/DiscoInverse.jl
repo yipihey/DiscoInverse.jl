@@ -73,4 +73,8 @@ export inject_mock, model_lambda, overall_correlation, cross_spectrum_r
 include("validation/mock.jl")
 include("validation/diagnostics.jl")
 
+# ── Grid-free sheet-on-lightcone forward + point-process likelihood (P4) ───────
+export galaxy_density_sheet, SheetProblem, sheet_problem, inject_mock_sheet
+include("forward/sheet_field.jl")
+
 end # module

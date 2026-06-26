@@ -198,4 +198,30 @@ end
         end
     end
 
+    @testset "Grid-free sheet point-process likelihood (P4)" begin
+        c  = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
+        gm = galaxy_model(res, L, c, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        ωstar = randn(MersenneTwister(1), res,res,res); bstar = [1.8, 0.4, 0.2]
+        pts = inject_mock_sheet(gm, ωstar, bstar, 25.0*res^3; seed=2)
+        @test size(pts,1) > 1000
+        prob = sheet_problem(gm, pts; b0=[1.5,0,0], σb=[5.,5,5])
+        @test isfinite(loss(prob, zeros(res,res,res), [1.5,0,0]))
+        @test loss(prob, ωstar, bstar) < loss(prob, zeros(res,res,res), bstar)   # well-posed: truth lower
+        if ad_ok
+            fdm = central_fdm(5,1)
+            ω0 = zeros(res,res,res)                          # ∂/∂ω clean at the undeformed sheet
+            gω = Zygote.gradient(w -> loss(prob, w, bstar), ω0)[1]
+            for idx in ((3,4,5), (6,2,7))
+                fd = FiniteDifferences.grad(fdm, t->(u=copy(ω0); u[idx...]=t; loss(prob,u,bstar)), ω0[idx...])[1]
+                @test isapprox(gω[idx...], fd; rtol=1e-3)
+            end
+            gb = Zygote.gradient(b -> loss(prob, ωstar, b), bstar)[1]   # b only scales w_T (smooth)
+            for k in 2:3
+                fd = FiniteDifferences.grad(fdm, t->(bb=copy(bstar); bb[k]=t; loss(prob,ωstar,bb)), bstar[k])[1]
+                @test isapprox(gb[k], fd; rtol=1e-3)
+            end
+        end
+    end
+
 end

@@ -63,7 +63,7 @@ forward.  The 3 bias params stay on the host.  `fix_bias=true` optimises ω only
 (rather than L-BFGS) avoids the host scalar line-search that would sync the GPU every
 step; the ½‖ω‖² prior keeps the problem well-scaled so a fixed lr converges.
 """
-function adam_optimize(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::AbstractVector;
+function adam_optimize(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
                        iters::Int=200, lr::Real=0.05, fix_bias::Bool=false, b_lr::Real=lr,
                        β1::Real=0.9, β2::Real=0.999, ϵ::Real=1e-8, show_every::Int=0) where {T}
     ω  = copy(ω0); b = collect(float.(b0))
