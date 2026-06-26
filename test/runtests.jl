@@ -224,4 +224,35 @@ end
         end
     end
 
+    @testset "C⁰ density + F32 mixed-precision NUTS path (P6)" begin
+        c  = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
+        mk(T) = galaxy_model(res, L, c, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0, n_order=1, rsd=false, T=T)
+        gm = mk(Float64)
+        ωstar = randn(MersenneTwister(1), res,res,res); bstar = [1.8, 0.4, 0.2]
+        pts = inject_mock_sheet(gm, ωstar, bstar, 25.0*res^3; seed=2)
+        prob = sheet_problem(gm, pts; b0=[1.5,0,0], σb=[5.,5,5], c0=true)
+        @test loss(prob, ωstar, bstar) < loss(prob, zeros(res,res,res), bstar)   # C⁰ well-posed
+        if ad_ok
+            fdm = central_fdm(5,1); ω0 = zeros(res,res,res)
+            gω = Zygote.gradient(w -> loss(prob, w, bstar), ω0)[1]                # C⁰ loss FD (nodal+interp path)
+            for idx in ((3,4,5), (6,2,7))
+                fd = FiniteDifferences.grad(fdm, t->(u=copy(ω0); u[idx...]=t; loss(prob,u,bstar)), ω0[idx...])[1]
+                @test isapprox(gω[idx...], fd; rtol=1e-3)
+            end
+        end
+        # prior VALUE accumulated in F64 even for an F32 field (the NUTS ΔH-critical bit)
+        ωf = Float32.(ωstar)
+        @test isapprox(DiscoInverse.gaussian_prior(ωf), DiscoInverse.gaussian_prior(Float64.(ωf)); rtol=1e-9)
+        # mixed precision: F32 model + F64 leapfrog state → gradient returned in F64, tracks all-F64
+        if ad_ok
+            prob32 = sheet_problem(mk(Float32), Float32.(pts); b0=[1.5,0,0], σb=[5.,5,5], c0=true)
+            _, gω32, gb32 = DiscoInverse._loss_grad(prob32, Float64.(ωstar), Float64.(bstar))
+            @test eltype(gω32) === Float64 && eltype(gb32) === Float64
+            g64 = Zygote.gradient(w -> loss(prob, w, bstar), ωstar)[1]
+            cosθ = sum(vec(gω32) .* vec(g64)) / (sqrt(sum(abs2,gω32)) * sqrt(sum(abs2,g64)))
+            @test cosθ > 0.999
+        end
+    end
+
 end

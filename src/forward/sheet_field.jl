@@ -53,11 +53,11 @@ function galaxy_density_sheet_c0(gm::GalaxyModel, ω, b, pts, cl; floor_frac::Re
     return (ρg, Z)
 end
 
-struct SheetProblem{T<:AbstractFloat, GM, P, C}
+struct SheetProblem{T<:AbstractFloat, GM, P, C, U}
     gm::GM
     pts::P                  # (N_gal, 3) galaxy positions (fixed; redshift space)
     cl::C                   # chaining-mesh cell list on pts (built once)
-    u::Vector{T}            # PROV per-galaxy weights
+    u::U                    # PROV per-galaxy weights (host Vector or CuArray after gpu())
     Utot::T
     b0::Vector{T}; σb::Vector{T}
     ρfloor::T               # floor for log ρ_g (galaxies in no tet)
@@ -72,9 +72,13 @@ function sheet_problem(gm::GalaxyModel{T}, pts::AbstractMatrix; u=nothing,
     P = T.(pts); hh = h === nothing ? gm.boxsize/gm.res : T(h)
     cl = build_cell_list(P, hh)
     uu = u === nothing ? ones(T, size(P,1)) : Vector{T}(u)
-    return SheetProblem{T, typeof(gm), typeof(P), typeof(cl)}(gm, P, cl, uu, sum(uu),
+    return SheetProblem{T, typeof(gm), typeof(P), typeof(cl), typeof(uu)}(gm, P, cl, uu, sum(uu),
                           Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac), c0)
 end
+
+# mixed-precision NUTS hook: an F32 SheetProblem evaluates its analytic forward in F32
+# while the sampler keeps its leapfrog state in F64 (see infer/nuts.jl `_loss_grad`).
+_model_T(prob::SheetProblem{T}) where {T} = T
 
 _sheet_dens(prob::SheetProblem, ω, b) = prob.c0 ?
     galaxy_density_sheet_c0(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac) :

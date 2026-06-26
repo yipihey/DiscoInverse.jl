@@ -28,17 +28,38 @@ end
 _kin(pt::_PP, mb) = 0.5 * (sum(x -> Float64(abs2(x)), pt.pω) + sum(mb .* pt.pb .^ 2))  # F64 accum (F32 momentum sum → O(1) ΔH error)
 _ham(pt::_PP, mb) = pt.U + _kin(pt, mb)
 
+# Forward-model float precision (the gm/operators eltype).  The HMC leapfrog STATE (ω, p)
+# is kept in Float64 for energy conservation — it accumulates ω += ε·p over ~2^depth
+# sub-steps, and F32 round-off there drifts ΔH by O(1) (acceptance 0.82→0.12).  Each
+# gradient, by contrast, is ONE analytic LPT evaluation: we cast to the model precision so
+# an F32 model gives a light, fast F32 forward/tape with NO loss of acceptance.  (The LPT
+# forward is analytic — no timestepping; the sampler's leapfrog is the only integrator
+# anywhere, which is exactly why only IT needs F64.)
+_model_T(prob::InferenceProblem{T}) where {T} = T
+_model_T(prob) = Float64   # SheetProblem method added in forward/sheet_field.jl (included later)
+
+# value + gradient of the loss, evaluated in the model precision but returned in the
+# leapfrog (state) precision Ts.  U is already Float64 (the deposit/Z accumulators are F64).
+function _loss_grad(prob, ω, b)
+    Tf = _model_T(prob); Ts = eltype(ω)
+    if Tf === Ts
+        r = Zygote.withgradient((x, y) -> loss(prob, x, y), ω, b)
+        return r.val, r.grad[1], r.grad[2]
+    end
+    r = Zygote.withgradient((x, y) -> loss(prob, x, y), Tf.(ω), Tf.(b))
+    return r.val, Ts.(r.grad[1]), Ts.(r.grad[2])
+end
+
 # one leapfrog step of (signed) size ε; recomputes & caches the gradient at the new point
 function _leap(prob, pt::_PP, ε, mb)
     pω = pt.pω .- (ε / 2) .* pt.gω
     pb = pt.pb .- (ε / 2) .* pt.gb
     ω  = pt.ω .+ ε .* pω
     b  = pt.b .+ ε .* (mb .* pb)
-    r  = Zygote.withgradient((x, y) -> loss(prob, x, y), ω, b)
-    gω = r.grad[1]; gb = r.grad[2]
+    U, gω, gb = _loss_grad(prob, ω, b)
     pω = pω .- (ε / 2) .* gω
     pb = pb .- (ε / 2) .* gb
-    return _PP(ω, b, pω, pb, gω, gb, r.val)
+    return _PP(ω, b, pω, pb, gω, gb, U)
 end
 
 # generalized no-U-turn: (Δq)·(M⁻¹ r) ≥ 0 at both ends  (M⁻¹ = 1 for ω, mb for b)
@@ -80,9 +101,11 @@ end
 # one NUTS transition from `pt0` (whose grad/U are cached); returns (new_pt, accept_stat, depth, ndiv)
 # `Mb` is the bias mass (3-vector M_b); mb = M_b⁻¹, momentum pb ~ N(0, M_b).
 function _nuts_step(prob, pt0::_PP, ε, Mb, max_depth, rng)
-    mb = 1 ./ Mb
-    pω = similar(pt0.ω); _fill_randn!(rng, pω)
-    pb = randn(rng, 3) .* sqrt.(Mb)
+    T  = eltype(pt0.ω)                       # keep the whole leapfrog in the field precision T:
+    ε  = T(ε)                                # ε from F64 dual-averaging, mb/pb from F64 mass — cast
+    mb = T.(1 ./ Mb)                         # so an F32 field/bias isn't silently promoted to F64
+    pω = similar(pt0.ω); _fill_randn!(rng, pω)  # (and pb/gb/b share one _PP{A,V} eltype).
+    pb = T.(randn(rng, 3) .* sqrt.(Mb))
     pt = _PP(pt0.ω, pt0.b, pω, pb, pt0.gω, pt0.gb, pt0.U)
     H0 = _ham(pt, mb)
     logu = log(rand(rng)) - H0
@@ -113,16 +136,16 @@ end
 Single NUTS chain over (ω, b).  Returns `(; b_samples, b_mean, b_std, ω_mean, ω_std,
 ω_draws, accept, ε, depths, divergences, loss_trace)`.
 """
-function nuts_sample(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::AbstractVector;
+function nuts_sample(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
                      nsamples::Int=400, nwarmup::Int=300, max_depth::Int=8,
                      b_mass=25.0, target_accept::Real=0.8, ε0::Real=0.05,
                      keep_fields::Int=5, seed::Int=0, show_every::Int=0, gc_every::Int=10,
                      reclaim=() -> nothing) where {T}
     rng = MersenneTwister(seed)
-    ω = copy(ω0); b = collect(float.(b0))
+    ω = copy(ω0); b = T.(collect(float.(b0)))   # leapfrog state precision = T (eltype ω0; F64 even for an F32 model)
     Mb = b_mass isa Number ? fill(float(b_mass), 3) : collect(float.(b_mass))   # per-param bias mass
-    r0 = Zygote.withgradient((x, y) -> loss(prob, x, y), ω, b)
-    pt = _PP(ω, b, similar(ω), b .* 0, r0.grad[1], r0.grad[2], r0.val)
+    U0, g0ω, g0b = _loss_grad(prob, ω, b)
+    pt = _PP(ω, b, similar(ω), b .* 0, g0ω, g0b, U0)
 
     logε = log(T(ε0)); μ = log(T(10) * T(ε0)); logε̄ = zero(Float64); H̄ = 0.0
     γ = 0.05; t0 = 10.0; κ = 0.75
@@ -209,7 +232,7 @@ Run `nchains` NUTS chains from over-dispersed field starts (ω0 + dispersion·N(
 chain) and pool the bias parameters with split-R̂ and multi-chain ESS.  `kw...` forwards
 to `nuts_sample`.
 """
-function nuts_chains(prob::InferenceProblem, ω0::AbstractArray{T,3}, b0::AbstractVector;
+function nuts_chains(prob, ω0::AbstractArray{T,3}, b0::AbstractVector;
                      nchains::Int=4, dispersion::Real=1.0, seed::Int=0, kw...) where {T}
     chains = map(1:nchains) do c
         ω0c = ω0 .+ T(dispersion) .* (c == 1 ? zero(ω0) : begin

@@ -10,7 +10,7 @@ KA atomic-scatter deposit) — ~30× the CPU forward, ~33× the gradient (res=64
 module DiscoInverseCUDAExt
 
 using DiscoInverse
-using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem
+using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem
 using DiscoDJNative
 using CUDA
 
@@ -37,6 +37,16 @@ function DiscoInverse.gpu(prob::InferenceProblem{T}) where {T}
     dv  = prob.data_var === nothing ? nothing : CuArray(prob.data_var)
     return InferenceProblem{T, typeof(gmg)}(gmg, CuArray(prob.W), CuArray(prob.mask),
         CuArray(prob.n_obs), prob.ntot, prob.b0, prob.σb, prob.λfloor, dv)
+end
+
+# Move a grid-free sheet problem to the device: GPU forward + the per-galaxy weights `u`
+# as a CuArray (loss broadcasts `u .* log ρ_g`, so `u` must match the device ρ_g).  The
+# galaxy positions / cell list stay on the host — the deposit kernels copy them to the
+# backend per call anyway (`mv` in sheet_density.jl); the bias 3-vectors stay on the host.
+function DiscoInverse.gpu(prob::SheetProblem{T}) where {T}
+    gmg = DiscoInverse.gpu(prob.gm); ug = CuArray(prob.u)
+    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug)}(
+        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0)
 end
 
 end # module

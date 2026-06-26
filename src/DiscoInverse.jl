@@ -18,7 +18,8 @@ using DiscoDJNative
 using FFTW
 using LinearAlgebra
 using Statistics: mean
-using ChainRulesCore: @ignore_derivatives
+using ChainRulesCore: @ignore_derivatives, NoTangent
+import ChainRulesCore: rrule
 using Random
 
 # Re-export the DiscoDJNative differentiable forward primitives this package builds on.
