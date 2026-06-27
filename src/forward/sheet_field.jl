@@ -62,7 +62,19 @@ function galaxy_density_sheet_c0(gm::GalaxyModel, ω, b, pts, cl; floor_frac::Re
     return (ρg, Z)
 end
 
-struct SheetProblem{T<:AbstractFloat, GM, P, C, U, W}
+"""    galaxy_density_sheet_c0_masked(gm, ω, b, pts, cl, active; floor_frac=1e-3, window=nothing) -> (ρ_g, Z)
+
+Sheet-on-mask C⁰ galaxy density restricted to the footprint trace-back `active` mask — only the ~10%
+active tets are processed (nodal_density_masked + interp_sheet_at_points_masked).  Exact at the
+footprint galaxies (their containing tets are active); ~9× fewer tets.  Differentiable w.r.t. ω, b."""
+function galaxy_density_sheet_c0_masked(gm::GalaxyModel, ω, b, pts, cl, active; floor_frac::Real=1e-3, window=nothing)
+    xg, wg = _sheet_inputs(gm, ω, b)
+    ρv, Z = nodal_density_masked(xg, _apply_window(wg, window), gm.res, gm.boxsize, active; floor_frac=floor_frac)
+    ρg = interp_sheet_at_points_masked(xg, ρv, pts, cl, gm.res, active)
+    return (ρg, Z)
+end
+
+struct SheetProblem{T<:AbstractFloat, GM, P, C, U, W, A}
     gm::GM
     pts::P                  # (N_gal, 3) galaxy positions (fixed; redshift space)
     cl::C                   # chaining-mesh cell list on pts (built once)
@@ -73,6 +85,7 @@ struct SheetProblem{T<:AbstractFloat, GM, P, C, U, W}
     floor_frac::T           # caustic floor: |V_T| ≥ floor_frac·V_Lagrangian (caps ρ_T)
     c0::Bool                # C⁰ nodal-averaged density (true, optimizable) vs piecewise-constant
     window::W               # survey footprint mask (res³, Lagrangian) folded into w_T, or nothing
+    active::A               # footprint trace-back mask (Bool res³) → sheet-on-mask (~9× fewer tets), or nothing
 end
 
 """    sheet_problem(gm, pts; u, b0, σb, ρfloor=1e-8, floor_frac=1e-3, c0=true, window=nothing, h=cell) -> SheetProblem
@@ -82,22 +95,26 @@ per-vertex weight so the normalization integrates only over the observed volume 
 for real survey data (else the optimizer games Z with spurious out-of-footprint structure)."""
 function sheet_problem(gm::GalaxyModel{T}, pts::AbstractMatrix; u=nothing,
                        b0=[1.0,0,0], σb=[5.0,5,5], ρfloor::Real=1e-8, floor_frac::Real=1e-3,
-                       c0::Bool=true, window=nothing, h=nothing) where {T}
+                       c0::Bool=true, window=nothing, active=nothing, h=nothing) where {T}
     P = T.(pts); hh = h === nothing ? gm.boxsize/gm.res : T(h)
     cl = build_cell_list(P, hh)
     uu = u === nothing ? ones(T, size(P,1)) : Vector{T}(u)
     win = window === nothing ? nothing : Array{T,3}(window)
-    return SheetProblem{T, typeof(gm), typeof(P), typeof(cl), typeof(uu), typeof(win)}(gm, P, cl, uu, sum(uu),
-                          Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac), c0, win)
+    act = active === nothing ? nothing : Array{Bool,3}(active)
+    return SheetProblem{T, typeof(gm), typeof(P), typeof(cl), typeof(uu), typeof(win), typeof(act)}(gm, P, cl, uu, sum(uu),
+                          Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac), c0, win, act)
 end
 
 # mixed-precision NUTS hook: an F32 SheetProblem evaluates its analytic forward in F32
 # while the sampler keeps its leapfrog state in F64 (see infer/nuts.jl `_loss_grad`).
 _model_T(prob::SheetProblem{T}) where {T} = T
 
-_sheet_dens(prob::SheetProblem, ω, b) = prob.c0 ?
-    galaxy_density_sheet_c0(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac, window=prob.window) :
-    galaxy_density_sheet(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac, window=prob.window)
+_sheet_dens(prob::SheetProblem, ω, b) =
+    prob.active !== nothing ?
+        galaxy_density_sheet_c0_masked(prob.gm, ω, b, prob.pts, prob.cl, prob.active; floor_frac=prob.floor_frac, window=prob.window) :
+    prob.c0 ?
+        galaxy_density_sheet_c0(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac, window=prob.window) :
+        galaxy_density_sheet(prob.gm, ω, b, prob.pts, prob.cl; floor_frac=prob.floor_frac, window=prob.window)
 
 """    loss(prob::SheetProblem, ω, b) -> −Σ u_g log ρ_g + U log Z + priors  (Zygote entry point)"""
 function loss(prob::SheetProblem, ω, b)

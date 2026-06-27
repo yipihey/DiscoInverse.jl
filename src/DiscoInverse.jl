@@ -76,7 +76,7 @@ include("validation/mock.jl")
 include("validation/diagnostics.jl")
 
 # ── Grid-free sheet-on-lightcone forward + point-process likelihood (P4) ───────
-export galaxy_density_sheet, galaxy_density_sheet_c0, SheetProblem, sheet_problem, inject_mock_sheet
+export galaxy_density_sheet, galaxy_density_sheet_c0, galaxy_density_sheet_c0_masked, SheetProblem, sheet_problem, inject_mock_sheet
 include("forward/sheet_field.jl")
 
 # ── Fixed-amplitude (Angulo–Pontzen) phase parametrization — Stage-1 MAP ───────

@@ -46,8 +46,9 @@ end
 function DiscoInverse.gpu(prob::SheetProblem{T}) where {T}
     gmg = DiscoInverse.gpu(prob.gm); ug = CuArray(prob.u)
     win = prob.window === nothing ? nothing : CuArray(prob.window)
-    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug), typeof(win)}(
-        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0, win)
+    act = prob.active === nothing ? nothing : CuArray(prob.active)
+    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug), typeof(win), typeof(act)}(
+        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0, win, act)
 end
 
 end # module
