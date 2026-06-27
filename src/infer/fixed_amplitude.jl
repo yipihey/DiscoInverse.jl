@@ -24,18 +24,19 @@ using LinearAlgebra: dot
 # generic device-resident L-BFGS over an arbitrary loss f (gradient g); state x is any array/vector
 # (CuArray phases or a host bias vector) — only dot/broadcast are used, so it stays on x's backend.
 function _lbfgs_generic(f, g, x0; iters::Int=30, m::Int=10, c1::Real=1e-4, ρ::Real=0.5, max_ls::Int=25)
+    T = real(eltype(x0))                                     # keep all array ops in x's precision (F32 res=256)
     x = copy(x0); fx = f(x); gx = g(x)
-    S = typeof(x)[]; Y = typeof(x)[]; ρs = Float64[]; hist = Float64[fx]
+    S = typeof(x)[]; Y = typeof(x)[]; ρs = T[]; hist = Float64[fx]
     for _ in 1:iters
-        q = copy(gx); k = length(S); al = zeros(k)
-        for i in k:-1:1; al[i] = ρs[i]*dot(S[i], q); q .-= al[i].*Y[i]; end
-        γ = k == 0 ? 1.0 : dot(S[end], Y[end]) / dot(Y[end], Y[end]); r = γ .* q
-        for i in 1:k; β = ρs[i]*dot(Y[i], r); r .+= (al[i]-β).*S[i]; end
+        q = copy(gx); k = length(S); al = zeros(T, k)
+        for i in k:-1:1; al[i] = T(ρs[i]*dot(S[i], q)); q .-= al[i].*Y[i]; end
+        γ = k == 0 ? one(T) : T(dot(S[end], Y[end]) / dot(Y[end], Y[end])); r = γ .* q
+        for i in 1:k; β = T(ρs[i]*dot(Y[i], r)); r .+= (al[i]-β).*S[i]; end
         d = .-r; gd = dot(gx, d); gd ≥ 0 && (d = .-gx; gd = dot(gx, d))
-        a = 1.0; xn = x .+ a.*d; fn = f(xn); ls = 0
-        while (fn > fx + c1*a*gd || !isfinite(fn)) && ls < max_ls; a *= ρ; xn = x .+ a.*d; fn = f(xn); ls += 1; end
+        a = one(T); xn = x .+ a.*d; fn = f(xn); ls = 0
+        while (fn > fx + c1*a*gd || !isfinite(fn)) && ls < max_ls; a *= T(ρ); xn = x .+ a.*d; fn = f(xn); ls += 1; end
         gn = g(xn); s = xn .- x; y = gn .- gx; sy = dot(s, y)
-        sy > 1e-12 && (push!(S,s); push!(Y,y); push!(ρs,1/sy); length(S) > m && (popfirst!(S);popfirst!(Y);popfirst!(ρs)))
+        sy > 1e-12 && (push!(S,s); push!(Y,y); push!(ρs,T(1/sy)); length(S) > m && (popfirst!(S);popfirst!(Y);popfirst!(ρs)))
         x = xn; fx = fn; gx = gn; push!(hist, fx)
     end
     return x, fx, hist
