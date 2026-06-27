@@ -80,7 +80,7 @@ export galaxy_density_sheet, galaxy_density_sheet_c0, SheetProblem, sheet_proble
 include("forward/sheet_field.jl")
 
 # ── Fixed-amplitude (Angulo–Pontzen) phase parametrization — Stage-1 MAP ───────
-export phase_field, phase_loss, phase_map_optimize
+export phase_field, phase_loss, phase_map_optimize, cosmic_variance_b1
 include("infer/fixed_amplitude.jl")
 
 end # module

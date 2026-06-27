@@ -94,3 +94,32 @@ function phase_map_optimize(prob, φ0; b1_grid=collect(1.0:0.5:3.0), phase_iters
     end
     return (b1 = b1star, σ_b1_cond = σ, φ = φstar, ω = phase_field(φstar), b1_grid = bs, losses = losses)
 end
+
+"""
+    cosmic_variance_b1(prob, φstar; K=24, b1_grid=1.0:0.25:3.5, seed=100)
+        -> (; b1_mean, σ_cosmic, b1_samples)
+
+Stage-2 cosmic-variance budget around a Stage-1 best-fit.  Holding the best-fit phases `φstar`,
+draw `K` per-mode amplitude realizations (Rayleigh, ⟨a²⟩=1 — the amplitude scatter Stage-1 froze
+out) and re-fit b₁ (1-D, field fixed) for each; the spread `σ_cosmic` is the sample-variance error
+that inflates the over-confident Stage-1 conditional σ into the realistic one.  Frozen-phase
+approximation (the phases are not re-optimized per realization) ⇒ a slight under-estimate.
+"""
+function cosmic_variance_b1(prob, φstar; K::Int=24, b1_grid=collect(1.0:0.25:3.5), seed::Int=100)
+    res = size(φstar, 2); sφ = exp.(im .* φstar); bs = collect(float.(b1_grid))
+    fit1d(ω) = begin
+        ls = [let r = _sheet_dens(prob, ω, [b1, 0.0, 0.0])
+                  -sum(prob.u .* log.(max.(r[1], prob.ρfloor))) + prob.Utot * log(r[2])
+              end for b1 in bs]
+        i = argmin(ls)
+        (1 < i < length(ls)) ? bs[i] - (bs[2]-bs[1])*(ls[i+1]-ls[i-1]) / (2*(ls[i-1]-2ls[i]+ls[i+1])) : bs[i]
+    end
+    b1s = Float64[]
+    for j in 1:K
+        g1 = randn(MersenneTwister(seed+j), size(φstar)); g2 = randn(MersenneTwister(seed+K+j), size(φstar))
+        a = similar(φstar); copyto!(a, sqrt.(g1.^2 .+ g2.^2) ./ sqrt(2))   # Rayleigh amplitudes on φ's backend
+        w = irfft(a .* sφ, res)
+        push!(b1s, fit1d(w ./ std(w)))
+    end
+    return (b1_mean = mean(b1s), σ_cosmic = std(b1s), b1_samples = b1s)
+end
