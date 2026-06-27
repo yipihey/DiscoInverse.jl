@@ -79,4 +79,8 @@ include("validation/diagnostics.jl")
 export galaxy_density_sheet, galaxy_density_sheet_c0, SheetProblem, sheet_problem, inject_mock_sheet
 include("forward/sheet_field.jl")
 
+# ── Fixed-amplitude (Angulo–Pontzen) phase parametrization — Stage-1 MAP ───────
+export phase_field, phase_loss, phase_map_optimize
+include("infer/fixed_amplitude.jl")
+
 end # module

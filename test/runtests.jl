@@ -255,6 +255,20 @@ end
         end
     end
 
+    @testset "Fixed-amplitude phase field (Angulo–Pontzen, Stage-1)" begin
+        res = 8
+        φ  = 2π .* rand(MersenneTwister(1), res÷2+1, res, res)
+        ω  = phase_field(φ)
+        @test size(ω) == (res, res, res)
+        @test isapprox(std(ω), 1.0; rtol=1e-6)                       # unit variance (per-call normalized)
+        φ2 = 2π .* rand(MersenneTwister(2), res÷2+1, res, res)        # ANY phases → unit variance
+        @test isapprox(std(phase_field(φ2)), 1.0; rtol=1e-6)
+        if ad_ok                                                     # differentiable w.r.t. the phases
+            g = Zygote.gradient(φv -> sum(phase_field(φv).^3), φ)[1]
+            @test size(g) == size(φ) && all(isfinite, g)
+        end
+    end
+
     @testset "PROV per-galaxy weights (P7)" begin
         cat = EchoesCatalog([10.0,11,12,13], [0.0,1,2,3], [0.5,0.5,0.5,0.5], Int8[0,1,2,3])
         u = prov_weights(cat; soft=0.4)
