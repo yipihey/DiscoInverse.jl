@@ -5,7 +5,7 @@ version = "0.1.0"
 
 [deps]
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-DiscoDJNative = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+DiscoDJNative = "a63bbb6b-882d-410c-bee8-eee95503f980"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
