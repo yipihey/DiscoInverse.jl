@@ -97,6 +97,7 @@ include("forward/constrained_box.jl")
 
 # ── Multi-tracer joint field reconstruction (Quaia + DESI + BOSS + eBOSS + …) ──
 export Tracer, tracer, MultiTracerProblem, multitracer_problem, multitracer_phase_loss, reconstruct_joint_field
+export LensingConstraint, lensing_constraint, kappa_map
 include("forward/multitracer.jl")
 
 end # module

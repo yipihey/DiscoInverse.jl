@@ -475,4 +475,35 @@ end
         @test multitracer_phase_loss(mtp, r.φ) < l0
     end
 
+    @testset "CMB-lensing constraint (κ ray-march through the sheet)" begin
+        c = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        rng = MersenneTwister(0); Nr = 300
+        ra = 360 .* rand(rng, Nr); dec = rad2deg.(asin.(2 .* rand(rng, Nr) .- 1)); z = 0.1 .+ 0.9 .* rand(rng, Nr)
+        res = 16; geom = box_geometry((ra=ra, dec=dec, z=z), c; res=res, pad_frac=0.1); L = geom.boxsize
+        gm = galaxy_model(res, L, c, pk; R=max(2L/res, 80.0), observer=geom.observer,
+                          a_far=geom.a_far, a_near=geom.a_near, n_order=1, rsd=false)
+        ndir = 60; φg = π*(3 - sqrt(5))                                  # Fibonacci sky directions
+        nhat = [ (i2=i-1; y=1-2i2/(ndir-1); r=sqrt(max(0,1-y^2)); k==1 ? r*cos(φg*i2) : k==2 ? y : r*sin(φg*i2))
+                 for i in 1:ndir, k in 1:3 ]
+        ω = randn(MersenneTwister(1), res, res, res)
+        # the differentiable convergence forward
+        lc0 = lensing_constraint(gm, geom, c, nhat, zeros(ndir); nshell=12)
+        κ = kappa_map(lc0, gm, ω)
+        @test length(κ) == ndir && all(isfinite, κ) && std(κ) > 0
+        if ad_ok
+            g = Zygote.gradient(w -> 0.5*sum(abs2, kappa_map(lc0, gm, w)), ω)[1]
+            @test all(isfinite, g) && any(abs.(g) .> 0)                  # ∂κ/∂ω via existing rrules
+        end
+        # as a constraint inside a joint problem: toward a mock κ, added to a tracer term
+        lc = lensing_constraint(gm, geom, c, nhat, κ; nshell=12)
+        pts = inject_mock_sheet(gm, ω, [2.0, 0, 0], 15.0 * res^3; seed=3)
+        mtp = multitracer_problem(gm, [tracer(gm, pts; b1=2.0, window=ones(res,res,res))]; lensing=lc)
+        φ0 = 2π .* rand(MersenneTwister(2), res ÷ 2 + 1, res, res)
+        @test isfinite(multitracer_phase_loss(mtp, φ0))
+        if ad_ok
+            gφ = Zygote.gradient(φ -> multitracer_phase_loss(mtp, φ), φ0)[1]
+            @test all(isfinite, gφ) && any(abs.(gφ) .> 0)
+        end
+    end
+
 end
