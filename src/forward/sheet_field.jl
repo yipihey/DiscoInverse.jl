@@ -18,12 +18,13 @@ rrules).  `inject_mock_sheet` samples a galaxy catalogue from the model for
 injection-recovery.
 """
 
-# Shared upstream: ω,b → (x_obs vertices on the lightcone, per-vertex bias weight).
-function _sheet_inputs(gm::GalaxyModel{T}, ω::AbstractArray{T,3}, b) where {T}
+# Shared, BIAS-INDEPENDENT geometry: ω → (x_obs vertices on the lightcone, δ_L, s²). Computed once and
+# reused across tracers of different bias in the multi-tracer forward (forward/multitracer.jl); the
+# expensive LPT + lightcone happen here, only the per-vertex weight below depends on the bias.
+function _sheet_geometry(gm::GalaxyModel{T}, ω::AbstractArray{T,3}) where {T}
     fphi   = white_noise_to_fphi(gm.op, ω)
     Psi    = exact_shape_stack(compute_core_exact(fphi, gm.K; n_order=gm.n_order))
     δL, s2 = bias_fields(fphi, gm.ops)
-    wg     = bias_weight(δL, s2, gm.sigma2, gm.s2mean; b1=b[1], b2=b[2], bs2=b[3])
     lc     = lightcone_cross_ad(Psi, gm.qflat, gm.cosmo, gm.observer, gm.a_far, gm.a_near; rsd=gm.rsd)
     x      = lc.x_obs
     if gm.rsd
@@ -32,7 +33,16 @@ function _sheet_inputs(gm::GalaxyModel{T}, ω::AbstractArray{T,3}, b) where {T}
         s  = lc.v_r ./ max.(sqrt.(d1.^2 .+ d2.^2 .+ d3.^2), T(1e-30))
         x  = hcat(x[:,1] .+ s.*d1, x[:,2] .+ s.*d2, x[:,3] .+ s.*d3)
     end
-    return reshape(x, gm.res, gm.res, gm.res, 3), wg
+    return reshape(x, gm.res, gm.res, gm.res, 3), δL, s2
+end
+
+# per-vertex bias weight w(q) for bias b, from the shared (δ_L, s²)
+_sheet_weight(gm::GalaxyModel, δL, s2, b) = bias_weight(δL, s2, gm.sigma2, gm.s2mean; b1=b[1], b2=b[2], bs2=b[3])
+
+# Shared upstream: ω,b → (x_obs vertices on the lightcone, per-vertex bias weight).
+function _sheet_inputs(gm::GalaxyModel, ω, b)
+    xg, δL, s2 = _sheet_geometry(gm, ω)
+    return xg, _sheet_weight(gm, δL, s2, b)
 end
 
 # Per-vertex weight w(q) ← max(bias(q), 0)·W(q):

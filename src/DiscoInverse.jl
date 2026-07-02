@@ -44,6 +44,8 @@ include("forward/galaxy_field.jl")
 # ── ECHOES data IO ────────────────────────────────────────────────────────────
 export EchoesCatalog, load_echoes_realization, load_echoes_randoms, n_realizations, prov_mask, prov_weights
 include("data/echoes_io.jl")
+export QuaiaCatalog, load_quaia, load_quaia_randoms
+include("data/quaia_io.jl")
 
 # ── Geometry: wedge → comoving box ────────────────────────────────────────────
 export fiducial_cosmology, radec_z_to_cartesian, BoxGeometry, box_geometry, embed, embed_radec_z
@@ -54,9 +56,11 @@ export survey_window, bin_galaxies
 include("window/window.jl")
 
 # ── Likelihood + prior + loss ─────────────────────────────────────────────────
-export poisson_nll, overdispersed_nll, gaussian_prior, bias_prior
+export poisson_nll, overdispersed_nll, gaussian_prior, bias_prior, redshift_prior
 include("likelihood/poisson.jl")
 include("likelihood/prior.jl")
+export PhotozMixture, calibrate_photoz, radial_posterior_ensemble, coverage_pit
+include("likelihood/photoz.jl")
 export InferenceProblem, inference_problem, inference_problem_overdispersed,
        galaxy_model_for, prov_weights, model_density, loss
 include("likelihood/loss.jl")
@@ -82,5 +86,17 @@ include("forward/sheet_field.jl")
 # ── Fixed-amplitude (Angulo–Pontzen) phase parametrization — Stage-1 MAP ───────
 export phase_field, phase_loss, phase_map_optimize, cosmic_variance_b1
 include("infer/fixed_amplitude.jl")
+
+# ── Quaia field-level redshift reconstruction (χ-parametrized forward + ensemble) ──
+export QuaiaProblem, quaia_problem, quaia_positions, sky_directions, reconstruct_quaia, quaia_ensemble
+include("forward/quaia.jl")
+
+# ── Quaia-constrained periodic IC box (coarse-constrain → fine-realize refinement) ──
+export constrained_ic_box, constrained_ic_box_ensemble, refine_phases, export_white_noise, ic_box_snapshot
+include("forward/constrained_box.jl")
+
+# ── Multi-tracer joint field reconstruction (Quaia + DESI + BOSS + eBOSS + …) ──
+export Tracer, tracer, MultiTracerProblem, multitracer_problem, multitracer_phase_loss, reconstruct_joint_field
+include("forward/multitracer.jl")
 
 end # module

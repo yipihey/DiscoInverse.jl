@@ -10,7 +10,7 @@ KA atomic-scatter deposit) — ~30× the CPU forward, ~33× the gradient (res=64
 module DiscoInverseCUDAExt
 
 using DiscoInverse
-using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem
+using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem, Tracer, MultiTracerProblem
 using DiscoDJNative
 using CUDA
 
@@ -49,6 +49,16 @@ function DiscoInverse.gpu(prob::SheetProblem{T}) where {T}
     act = prob.active === nothing ? nothing : CuArray(prob.active)
     return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug), typeof(win), typeof(act)}(
         gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0, win, act)
+end
+
+# Move a joint multi-tracer problem to the device: GPU forward + each tracer's positions/window/weights
+# as CuArrays (cell lists stay host — the deposit kernels copy points to the backend per call).
+function DiscoInverse.gpu(tr::Tracer)
+    return Tracer(CuArray(tr.pts), tr.cl, CuArray(tr.window), tr.b0, CuArray(tr.u), tr.Utot)
+end
+function DiscoInverse.gpu(mtp::MultiTracerProblem{T}) where {T}
+    gmg = DiscoInverse.gpu(mtp.gm); trs = [DiscoInverse.gpu(tr) for tr in mtp.tracers]
+    return MultiTracerProblem{T, typeof(gmg), typeof(trs)}(gmg, trs, mtp.ρfloor, mtp.floor_frac)
 end
 
 end # module

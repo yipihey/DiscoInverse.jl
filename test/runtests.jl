@@ -1,7 +1,8 @@
 using Test
 using DiscoInverse
+using DiscoDJNative: nodal_density
 using Random: MersenneTwister
-using Statistics: mean, std
+using Statistics: mean, std, median
 
 ad_ok = false
 try
@@ -319,6 +320,159 @@ end
             g = Zygote.gradient(w -> loss(pW, w, [1.5,0,0]), ω0)[1]
             @test all(isfinite, g)
         end
+    end
+
+    @testset "Quaia field-level redshift reconstruction (χ-param)" begin
+        c = fiducial_cosmology(); pk = linear_power_spectrum(c)
+
+        # redshift_prior: value matches the inline quadratic; gradient is the analytic (χ−χ_obs)/σ²
+        χo = collect(1000.0:10.0:1200.0); σ = fill(50.0, length(χo))
+        χp = χo .+ 5 .* randn(MersenneTwister(0), length(χo))
+        @test redshift_prior(χp, χo, σ) ≈ 0.5 * sum(((χo .- χp) ./ σ) .^ 2)
+        if ad_ok
+            g = Zygote.gradient(cc -> redshift_prior(cc, χo, σ), χp)[1]
+            @test isapprox(g, (χp .- χo) ./ σ .^ 2; rtol=1e-10)        # custom rrule == analytic
+            fdm = central_fdm(5, 1)
+            for i in (2, 11, 20)
+                fd = FiniteDifferences.grad(fdm, t -> (u = copy(χp); u[i] = t; redshift_prior(u, χo, σ)), χp[i])[1]
+                @test isapprox(g[i], fd; rtol=1e-6)
+            end
+        end
+
+        # mock all-sky catalog → QuaiaProblem (box sized from the randoms, observer at centre)
+        rng = MersenneTwister(7); N = 80
+        ra  = 360 .* rand(rng, N); dec = rad2deg.(asin.(2 .* rand(rng, N) .- 1)); z = 0.3 .+ 0.5 .* rand(rng, N)
+        rnd = (ra = 360 .* rand(rng, 4N), dec = rad2deg.(asin.(2 .* rand(rng, 4N) .- 1)), z = 0.3 .+ 0.5 .* rand(rng, 4N))
+        res = 8; geom = box_geometry(rnd, c; res=res, pad_frac=0.2); L = geom.boxsize
+        W   = survey_window(geom, rnd)
+        gm  = galaxy_model(res, L, c, pk; R=max(2L/res, 80.0), observer=geom.observer,
+                           a_far=geom.a_far, a_near=geom.a_near, n_order=1, rsd=false)
+        prob = quaia_problem(QuaiaCatalog(ra, dec, z, fill(0.05, N)), geom, gm, W; b1=2.0)
+        @test length(prob) == N
+        @test all(prob.σχ .> 0)                                          # χ(z+σ_z) > χ(z)
+        @test all(isapprox.(vec(sum(prob.nhat .^ 2; dims=2)), 1.0; atol=1e-10))   # unit sky directions
+
+        # ∂L/∂χ — the new query-point path (quasar positions as free parameters)
+        if ad_ok
+            ω = randn(MersenneTwister(1), res, res, res)
+            xg, wg = DiscoInverse._sheet_inputs(gm, ω, [2.0, 0, 0])
+            ρv, _  = nodal_density(xg, DiscoInverse._apply_window(wg, W), res, L)
+            dx = L / res; χ0 = copy(prob.χ_obs)
+            f  = cc -> DiscoInverse._quaia_chi_loss(cc, xg, ρv, prob.nhat, prob.shift, prob.χ_obs, prob.σχ, prob.u, dx, res)
+            g  = Zygote.gradient(f, χ0)[1]
+            @test all(isfinite, g)
+            rels = Float64[]
+            for i in (5, 30, 60)
+                ep = zeros(N); ep[i] = 1.0
+                fd = (f(χ0 .+ ep) - f(χ0 .- ep)) / 2
+                push!(rels, abs(fd - g[i]) / max(abs(fd), 1e-8))
+            end
+            @test median(rels) < 1e-2
+        end
+
+        # the χ-MAP machinery pulls an offset back toward the photo-z centre (prior alone, deterministic —
+        # the FIELD pull magnitude is structure-dependent and validated on real data, not this coarse mock)
+        χoff = prob.χ_obs .+ 40.0
+        fp = cc -> redshift_prior(cc, prob.χ_obs, prob.σχ)
+        cg, _, _ = DiscoInverse._lbfgs_generic(fp, cc -> Zygote.gradient(fp, cc)[1], copy(χoff); iters=20)
+        @test mean(abs.(cg .- prob.χ_obs)) < mean(abs.(χoff .- prob.χ_obs))
+
+        # the alternating-MAP driver runs end-to-end on the host → finite, valid zero-error catalog
+        r = reconstruct_quaia(prob, 101; device=identity, rounds=1, phase_iters=5, chi_iters=5)
+        @test length(r.χ) == N && length(r.z) == N && size(r.ω) == (res, res, res)
+        @test all(isfinite, r.χ) && all(isfinite, r.z)
+        @test all(zz -> 0 < zz < 5, r.z)                                # χ→z lands in the table range
+        @test size(r.φ) == (res ÷ 2 + 1, res, res)                      # fixed-amplitude phases exposed
+    end
+
+    @testset "Quaia-constrained periodic IC box (coarse→fine)" begin
+        c = fiducial_cosmology()
+        rng = MersenneTwister(5); N = 40
+        ra  = 360 .* rand(rng, N); dec = rad2deg.(asin.(2 .* rand(rng, N) .- 1)); z = 0.3 .+ 0.4 .* rand(rng, N)
+        rnd = (ra = 360 .* rand(rng, 4N), dec = rad2deg.(asin.(2 .* rand(rng, 4N) .- 1)), z = 0.3 .+ 0.4 .* rand(rng, 4N))
+        cart = radec_z_to_cartesian(rnd.ra, rnd.dec, rnd.z, c)
+        extent = maximum(vec(maximum(cart; dims=1)) .- vec(minimum(cart; dims=1)))
+
+        # explicit box length ≥ survey extent, survey centered; rejects too-small boxes
+        g_auto = box_geometry(rnd, c; res=8)
+        g_big  = box_geometry(rnd, c; res=8, boxsize=1.5 * extent)
+        @test g_big.boxsize ≈ 1.5 * extent
+        @test g_big.boxsize > g_auto.boxsize
+        @test_throws ErrorException box_geometry(rnd, c; res=8, boxsize=0.5 * extent)
+
+        # rfft coarse→fine index map (numpy fftfreq order): 4→8 sends freqs [0,1,-2,-1] to [1,2,7,8]
+        @test DiscoInverse._embed_indices(4, 8) == [1, 2, 7, 8]
+
+        # refine_phases: identity when res_box==res_constrain (whole grid embedded); finite + right
+        # shape when finer (the box is built with NO forward at res_box — the decoupling)
+        Nc = 8; φc = 2π .* rand(MersenneTwister(3), Nc ÷ 2 + 1, Nc, Nc)
+        @test refine_phases(φc, Nc; seed=0) ≈ phase_field(φc)
+        ωb = refine_phases(φc, 16; seed=1)
+        @test size(ωb) == (16, 16, 16) && all(isfinite, ωb)
+
+        # end-to-end driver: constrain at 8³, realize at 16³
+        cat = QuaiaCatalog(ra, dec, z, fill(0.05, N))
+        box = constrained_ic_box(cat, rnd, c; L_box=1.5 * extent, res_constrain=8, res_box=16,
+                                 b1=2.0, seed=101, rounds=1, phase_iters=4, chi_iters=4)
+        @test size(box.ω_box) == (16, 16, 16) && all(isfinite, box.ω_box)
+        @test box.manifest["res_box"] == 16 && box.manifest["res_constrain"] == 8
+        @test box.manifest["boxsize"] ≈ 1.5 * extent
+        @test box.manifest["constrained_radius"] > 0
+        @test size(box.φ_coarse) == (8 ÷ 2 + 1, 8, 8)                   # forward ran only at res_constrain
+    end
+
+    @testset "Photo-z calibration + radial-posterior ensemble" begin
+        rng = MersenneTwister(3); N = 20000
+        ztrue = 0.8 .+ 2.7 .* rand(rng, N)
+        iscat = rand(rng, N) .< 0.2                                     # 20% catastrophic outliers
+        x = ifelse.(iscat, 0.15 .* randn(rng, N), 0.006 .* randn(rng, N))
+        zobs = ztrue .+ x .* (1 .+ ztrue)
+        m = calibrate_photoz(zobs, ztrue)
+        @test 0.6 < m.w[1] < 0.95                                        # core weight ~0.8 recovered
+        @test m.σ[1] < 0.02 && m.σ[2] > 0.05                             # tight core + broad outlier
+        # sampled posterior is calibrated against the (held-out) truth
+        ens = radial_posterior_ensemble(zobs, m; K=200, seed=1)
+        cp = coverage_pit(ens, ztrue)
+        i68 = argmin(abs.(cp.levels .- 0.68)); i90 = argmin(abs.(cp.levels .- 0.90))
+        @test abs(cp.coverage[i68] - 0.68) < 0.08
+        @test abs(cp.coverage[i90] - 0.90) < 0.08
+        # a naive over-confident ensemble (draws hugging z_obs) badly under-covers — the failure we fixed
+        narrow = zobs .+ 0.001 .* randn(rng, N, 50)
+        @test coverage_pit(narrow, ztrue).coverage[i68] < 0.4
+        # spec-z fold-in pins those objects
+        mask = falses(N); mask[1:1000] .= true
+        ens2 = radial_posterior_ensemble(zobs, m; z_spec=ztrue, spec_mask=mask, K=50, seed=2)
+        @test all(std(@view ens2[i, :]) < 0.01 for i in 1:1000)
+    end
+
+    @testset "Multi-tracer joint field reconstruction" begin
+        c = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        res = 8; L = 300.0; obs = [-1300.0, L/2, L/2]
+        gm = galaxy_model(res, L, c, pk; R=40.0, observer=obs, a_far=0.4, a_near=1.0, n_order=1, rsd=false)
+        ωstar = randn(MersenneTwister(1), res, res, res)
+        pts1 = inject_mock_sheet(gm, ωstar, [2.0, 0, 0], 20.0 * res^3; seed=2)
+        pts2 = inject_mock_sheet(gm, ωstar, [1.4, 0, 0], 20.0 * res^3; seed=3)
+        W = ones(res, res, res)
+        mtp = multitracer_problem(gm, [tracer(gm, pts1; b1=2.0, window=W),
+                                       tracer(gm, pts2; b1=1.4, window=W)])
+
+        # refactor sanity: _sheet_inputs == _sheet_geometry + _sheet_weight
+        xg, wg = DiscoInverse._sheet_inputs(gm, ωstar, [2.0, 0, 0])
+        xg2, δL, s2 = DiscoInverse._sheet_geometry(gm, ωstar)
+        @test xg ≈ xg2 && wg ≈ DiscoInverse._sheet_weight(gm, δL, s2, [2.0, 0, 0])
+
+        φ0 = 2π .* rand(MersenneTwister(5), res ÷ 2 + 1, res, res)
+        @test isfinite(multitracer_phase_loss(mtp, φ0))
+        if ad_ok
+            g = Zygote.gradient(φ -> multitracer_phase_loss(mtp, φ), φ0)[1]
+            @test all(isfinite, g) && any(abs.(g) .> 0)
+        end
+        # the joint reconstruction runs and improves the multi-tracer constraint
+        l0 = multitracer_phase_loss(mtp, φ0)
+        r = reconstruct_joint_field(mtp, 5; iters=10)
+        @test size(r.ω) == (res, res, res) && all(isfinite, r.ω)
+        @test size(r.φ) == (res ÷ 2 + 1, res, res)
+        @test multitracer_phase_loss(mtp, r.φ) < l0
     end
 
 end

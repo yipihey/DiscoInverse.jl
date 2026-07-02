@@ -43,18 +43,27 @@ struct BoxGeometry{T<:AbstractFloat, CO}
 end
 
 """
-    box_geometry(randoms, cosmo; res, pad_frac=0.15) -> BoxGeometry
+    box_geometry(randoms, cosmo; res, pad_frac=0.15, boxsize=nothing) -> BoxGeometry
 
 Size the comoving box from the survey randoms (the full footprint) with fractional
 padding, and place the observer.  `randoms` = `(; ra, dec, z)`.
+
+Pass an explicit `boxsize` (≥ the survey extent) to make a **periodic box larger than the
+survey** with the footprint kept CENTERED (`shift = L/2 − center`, observer at box center) —
+the constrained-IC-box mode (`forward/constrained_box.jl`), where the survey occupies the
+central sub-region and the rest is unconstrained padding.  `nothing` keeps the footprint
+auto-sizing.  `a_far`/`a_near` are redshift-derived and unaffected by the box size.
 """
-function box_geometry(randoms, cosmo; res::Int, pad_frac::Real=0.15)
+function box_geometry(randoms, cosmo; res::Int, pad_frac::Real=0.15, boxsize=nothing)
     T = eltype(randoms.ra)
     cart = radec_z_to_cartesian(randoms.ra, randoms.dec, randoms.z, cosmo)
     lo = vec(minimum(cart; dims=1)); hi = vec(maximum(cart; dims=1))
-    L  = maximum(hi .- lo) * (1 + 2 * T(pad_frac))
+    extent = maximum(hi .- lo)
+    L = boxsize === nothing ? extent * (1 + 2 * T(pad_frac)) : T(boxsize)
+    boxsize === nothing || L ≥ extent ||
+        error("boxsize ($(L) Mpc/h) must be ≥ the survey extent ($(extent) Mpc/h)")
     center = (lo .+ hi) ./ 2
-    shift  = L / 2 .- center                 # center the wedge in the box
+    shift  = L / 2 .- center                 # center the survey in the box
     a_far  = T(1 / (1 + maximum(randoms.z)))  # high z → small a (far)
     a_near = T(1 / (1 + minimum(randoms.z)))
     return BoxGeometry{T, typeof(cosmo)}(res, T(L), shift, copy(shift), a_far, a_near, cosmo)
