@@ -21,7 +21,7 @@ CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DiscoInverseCUDAExt = "CUDA"
 
 [sources]
-DiscoDJNative = {path = "../DiscoDJ.jl/native/DiscoDJNative"}
+DiscoDJNative = {url = "https://github.com/yipihey/DiscoDJ.jl.git", subdir = "native/DiscoDJNative", rev = "main"}
 
 [extras]
 FiniteDifferences = "26cc04aa-876d-5657-8c51-4c34ba976000"
