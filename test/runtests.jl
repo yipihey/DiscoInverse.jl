@@ -565,4 +565,29 @@ end
         end
     end
 
+    @testset "Perturb-and-MAP constrained realizations (Wiener posterior)" begin
+        c = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        rng = MersenneTwister(0); Nr = 200
+        ra = 360 .* rand(rng, Nr); dec = rad2deg.(asin.(2 .* rand(rng, Nr) .- 1)); z = 0.02 .+ 0.1 .* rand(rng, Nr)
+        res = 16; geom = box_geometry((ra=ra, dec=dec, z=z), c; res=res, pad_frac=0.15); L = geom.boxsize
+        gm = galaxy_model(res, L, c, pk; R=max(2L/res, 30.0), observer=geom.observer,
+                          a_far=geom.a_far, a_near=geom.a_near, n_order=2, rsd=false)
+        ω_true = randn(MersenneTwister(42), res, res, res)          # a prior draw N(0,I)
+        shift = vec(geom.shift); χn = comoving_distance(c, geom.a_near); χf = comoving_distance(c, geom.a_far)
+        Ng = 80; φg = π*(3 - sqrt(5))
+        dirs = [ (i2=i-1; y=1-2i2/(Ng-1); r=sqrt(max(0,1-y^2)); k==1 ? r*cos(φg*i2) : k==2 ? y : r*sin(φg*i2))
+                 for i in 1:Ng, k in 1:3 ]
+        rr = χn .+ (χf - χn) .* rand(MersenneTwister(3), Ng); pts = zeros(Ng, 3)
+        for p in 1:Ng; pts[p,:] = rr[p] .* dirs[p,:] .+ shift; end
+        vc0 = velocity_constraint(gm, geom, c, pts, zeros(Ng); sigma_v=fill(150.0, Ng))
+        vobs = radial_velocity(vc0, gm, ω_true) .+ 150.0 .* randn(MersenneTwister(9), Ng)
+        vc = velocity_constraint(gm, geom, c, pts, vobs; sigma_v=fill(150.0, Ng), submean=true)
+        mtp = multitracer_problem(gm, Tracer[]; velocity=vc)
+        ωwf = wiener_mean(mtp; iters=60)                            # posterior mean (Wiener filter)
+        @test size(ωwf) == (res, res, res) && all(isfinite, ωwf)
+        cr = constrained_realizations(mtp, 3; iters=60, seed=1)     # posterior samples
+        @test size(cr.omega_mean) == (res, res, res) && length(cr.draws) == 3
+        @test all(isfinite, cr.omega_mean) && all(isfinite, cr.omega_std) && mean(cr.omega_std) > 0
+    end
+
 end

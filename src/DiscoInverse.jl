@@ -105,4 +105,8 @@ include("forward/multitracer.jl")
 export CF4Catalog, load_cf4_groups, cf4_hubble, cf4_peculiar_velocity, cf4_box_geometry, cf4_velocity_constraint
 include("data/cf4_io.jl")
 
+# ── Perturb-and-MAP constrained realizations (Gaussian-ω posterior; velocity/lensing) ──
+export wiener_mean, constrained_realizations
+include("infer/constrained_realizations.jl")
+
 end # module
