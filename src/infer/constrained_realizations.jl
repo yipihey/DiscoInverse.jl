@@ -91,12 +91,15 @@ FFT high-pass projection; the ½‖ω_high‖² prior acts only on the free mode
 function constrained_zoom(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem, k_split_frac::Real;
                           iters::Int=150) where {T}
     N = size(ω_parent, 1)
-    mask  = _highpass_mask(N, k_split_frac)
-    ω_low = irfft(rfft(ω_parent) .* .!mask, N)         # parent's large scales (fixed)
+    m0    = _highpass_mask(N, k_split_frac)
+    mask  = similar(ω_parent, Bool, size(m0)); copyto!(mask, m0)   # to ω_parent's backend (host/CuArray)
+    lo    = .!mask
+    ω_low = irfft(rfft(ω_parent) .* lo, N)             # parent's large scales (fixed)
     hp(θ) = irfft(rfft(θ) .* mask, N)                  # high-pass projection of the free field
     f(θ)  = _mtp_data_loss(mtp, ω_low .+ hp(θ)) + 0.5 * sum(abs2, hp(θ))
     g!(G, θ) = (G .= Zygote.gradient(f, θ)[1]; G)
-    r = optimize(f, g!, zeros(T, N, N, N),
+    θ0 = fill!(similar(ω_parent), zero(T))
+    r = optimize(f, g!, θ0,
                  LBFGS(m=15, linesearch=Optim.LineSearches.BackTracking(order=2)),
                  Options(iterations=iters))
     return ω_low .+ hp(minimizer(r))
