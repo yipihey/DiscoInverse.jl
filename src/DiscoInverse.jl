@@ -106,7 +106,7 @@ export CF4Catalog, load_cf4_groups, cf4_hubble, cf4_peculiar_velocity, cf4_box_g
 include("data/cf4_io.jl")
 
 # ── Perturb-and-MAP constrained realizations (Gaussian-ω posterior; velocity/lensing) ──
-export wiener_mean, constrained_realizations, constrained_zoom
+export wiener_mean, constrained_realizations, constrained_zoom, constrained_zoom_realizations
 include("infer/constrained_realizations.jl")
 
 end # module

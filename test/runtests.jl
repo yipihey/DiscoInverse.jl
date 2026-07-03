@@ -596,6 +596,10 @@ end
         @test size(ωz) == (res, res, res) && all(isfinite, ωz)
         zlow = irfft(rfft(ωz) .* .!mask, res)                       # parent modes must be preserved exactly
         @test cor(vec(zlow), vec(ω_parent)) > 0.999
+        # noise-robust nested realizations (perturb-and-MAP zoom): parent preserved, proper posterior spread
+        crz = constrained_zoom_realizations(ω_parent, mtp, 0.35, 2; iters=25)
+        @test length(crz.draws) == 2 && all(isfinite, crz.omega_mean) && mean(crz.omega_std) > 0
+        @test cor(vec(irfft(rfft(crz.omega_mean) .* .!mask, res)), vec(ω_parent)) > 0.99
     end
 
 end

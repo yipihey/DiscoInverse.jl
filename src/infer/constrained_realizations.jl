@@ -104,3 +104,39 @@ function constrained_zoom(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem
                  Options(iterations=iters))
     return ω_low .+ hp(minimizer(r))
 end
+
+"""
+    constrained_zoom_realizations(ω_parent, mtp, k_split_frac, K; iters=150, seed=0) -> (; omega_mean, omega_std, draws)
+
+Noise-robust nested constrained realizations — **perturb-and-MAP for the fine modes while holding the
+parent's large scales fixed**.  Combines `constrained_zoom` (hold |k| < split to `ω_parent`) with the
+perturb-and-MAP regularization (`constrained_realizations`): each draw solves a MAP with a perturbed prior
+mean (a high-passed N(0,I) draw, also the warm start) and perturbed data (`v_obs + ε_d`), giving the
+posterior over the free modes — where a single MAP overfits noise-dominated data (e.g. CF4 → inflated bulk
+flow).  `omega_mean` is the Wiener zoom; `omega_std` the fine-scale uncertainty.  Runs on the GPU when
+`ω_parent`/`mtp` are device-resident."""
+function constrained_zoom_realizations(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem,
+                                       k_split_frac::Real, K::Int; iters::Int=150, seed::Int=0) where {T}
+    N = size(ω_parent, 1); vc = mtp.velocity
+    vc === nothing && error("constrained_zoom_realizations requires a velocity constraint")
+    m0 = _highpass_mask(N, k_split_frac); mask = similar(ω_parent, Bool, size(m0)); copyto!(mask, m0)
+    ω_low = irfft(rfft(ω_parent) .* .!mask, N)
+    hp(θ) = irfft(rfft(θ) .* mask, N)
+    σ = Array(1 ./ sqrt.(vc.invN))
+    draws = Vector{Array{T,3}}(undef, K)
+    for k in 1:K
+        rng = MersenneTwister(seed + k)
+        εp = fill!(similar(ω_parent), zero(T)); copyto!(εp, T.(randn(rng, N, N, N))); εph = hp(εp)
+        εd = similar(vc.v_obs); copyto!(εd, T.(randn(rng, length(σ)) .* σ))
+        mtpp = multitracer_problem(mtp.gm, mtp.tracers; velocity=_perturb_velocity(vc, εd),
+                                   ρfloor=mtp.ρfloor, floor_frac=mtp.floor_frac)
+        f(θ)  = _mtp_data_loss(mtpp, ω_low .+ hp(θ)) + 0.5 * sum(abs2, hp(θ) .- εph)
+        g!(G, θ) = (G .= Zygote.gradient(f, θ)[1]; G)
+        r = optimize(f, g!, copy(εp), LBFGS(m=15, linesearch=Optim.LineSearches.BackTracking(order=2)),
+                     Options(iterations=iters))
+        draws[k] = Array(ω_low .+ hp(minimizer(r)))
+    end
+    A = cat(draws...; dims=4)
+    return (omega_mean = dropdims(mean(A; dims=4); dims=4),
+            omega_std  = dropdims(std(A; dims=4); dims=4), draws = draws)
+end
