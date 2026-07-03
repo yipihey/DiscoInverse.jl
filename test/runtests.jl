@@ -2,7 +2,8 @@ using Test
 using DiscoInverse
 using DiscoDJNative: nodal_density
 using Random: MersenneTwister
-using Statistics: mean, std, median
+using Statistics: mean, std, median, cor
+using FFTW: rfft, irfft
 
 ad_ok = false
 try
@@ -588,6 +589,13 @@ end
         cr = constrained_realizations(mtp, 3; iters=60, seed=1)     # posterior samples
         @test size(cr.omega_mean) == (res, res, res) && length(cr.draws) == 3
         @test all(isfinite, cr.omega_mean) && all(isfinite, cr.omega_std) && mean(cr.omega_std) > 0
+        # constrained zoom: parent large scales held fixed (r=1), fine data reconstructed above the split
+        mask = DiscoInverse._highpass_mask(res, 0.35)
+        ω_parent = irfft(rfft(ω_true) .* .!mask, res)               # "global constraint" = truth's large scales
+        ωz = constrained_zoom(ω_parent, mtp, 0.35; iters=40)
+        @test size(ωz) == (res, res, res) && all(isfinite, ωz)
+        zlow = irfft(rfft(ωz) .* .!mask, res)                       # parent modes must be preserved exactly
+        @test cor(vec(zlow), vec(ω_parent)) > 0.999
     end
 
 end

@@ -17,6 +17,7 @@ quasi-linear scales.  The MAP with `ε_p = ε_d = 0` is the plain Wiener mean.
 
 using Optim: optimize, LBFGS, Options, minimizer
 import Optim
+using FFTW: rfft, irfft
 using Statistics: mean, std
 using Random: MersenneTwister
 
@@ -68,4 +69,35 @@ function constrained_realizations(mtp::MultiTracerProblem{T}, K::Int;
     return (omega_mean = dropdims(mean(A; dims=4); dims=4),
             omega_std  = dropdims(std(A; dims=4); dims=4),
             draws = draws)
+end
+
+# high-pass mask on the rfft grid: true for |k| ≥ frac·Nyquist (spherical, matching-physical-k)
+function _highpass_mask(N::Int, frac::Real)
+    kf = [(i-1) < N÷2 ? i-1 : i-1-N for i in 1:N]; kh = [i-1 for i in 1:N÷2+1]; ks = frac * (N/2)
+    return [sqrt(kh[c1]^2 + kf[c2]^2 + kf[c3]^2) >= ks for c1 in 1:N÷2+1, c2 in 1:N, c3 in 1:N]
+end
+
+"""
+    constrained_zoom(ω_parent, mtp, k_split_frac; iters=150) -> ω_zoom
+
+Nested / multi-scale constrained realization — the primitive for putting a **fine local constraint inside
+a coarse global field**. The field's large-scale modes (|k| < `k_split_frac`·Nyquist) are held **fixed to
+`ω_parent`** (the globally-constrained field, e.g. the Quaia/lensing carrier) while the smaller scales are
+reconstructed against the fine data in `mtp` (e.g. a Cosmicflows-4 `VelocityConstraint`) — so the result
+carries the global large scales *and* the local fine structure, **consistent by construction** (the parent
+modes are preserved bit-exactly). Above the split the field is pinned by the fine data where it informs and
+is a fresh ΛCDM draw where it doesn't. Optimized with LBFGS (backtracking) through the sheet forward + an
+FFT high-pass projection; the ½‖ω_high‖² prior acts only on the free modes."""
+function constrained_zoom(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem, k_split_frac::Real;
+                          iters::Int=150) where {T}
+    N = size(ω_parent, 1)
+    mask  = _highpass_mask(N, k_split_frac)
+    ω_low = irfft(rfft(ω_parent) .* .!mask, N)         # parent's large scales (fixed)
+    hp(θ) = irfft(rfft(θ) .* mask, N)                  # high-pass projection of the free field
+    f(θ)  = _mtp_data_loss(mtp, ω_low .+ hp(θ)) + 0.5 * sum(abs2, hp(θ))
+    g!(G, θ) = (G .= Zygote.gradient(f, θ)[1]; G)
+    r = optimize(f, g!, zeros(T, N, N, N),
+                 LBFGS(m=15, linesearch=Optim.LineSearches.BackTracking(order=2)),
+                 Options(iterations=iters))
+    return ω_low .+ hp(minimizer(r))
 end
