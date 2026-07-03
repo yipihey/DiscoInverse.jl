@@ -36,6 +36,17 @@ function _sheet_geometry(gm::GalaxyModel{T}, ω::AbstractArray{T,3}) where {T}
     return reshape(x, gm.res, gm.res, gm.res, 3), δL, s2
 end
 
+# Shared geometry PLUS the per-vertex peculiar-velocity vector, for a peculiar-velocity (cosmic-flows)
+# constraint.  Positions are REAL space (rsd=false — PV surveys give distances, not redshift-space);
+# vg = Σ_k f₁ D_k Ψ_k is the comoving-velocity vector (×100·a·E(a) → km/s).  Differentiable in ω.
+function _sheet_geometry_v(gm::GalaxyModel{T}, ω::AbstractArray{T,3}) where {T}
+    fphi   = white_noise_to_fphi(gm.op, ω)
+    Psi    = exact_shape_stack(compute_core_exact(fphi, gm.K; n_order=gm.n_order))
+    δL, s2 = bias_fields(fphi, gm.ops)
+    lc     = lightcone_cross_ad(Psi, gm.qflat, gm.cosmo, gm.observer, gm.a_far, gm.a_near; rsd=false, velocity=true)
+    return reshape(lc.x_obs, gm.res, gm.res, gm.res, 3), δL, s2, reshape(lc.v_vec, gm.res, gm.res, gm.res, 3)
+end
+
 # per-vertex bias weight w(q) for bias b, from the shared (δ_L, s²)
 _sheet_weight(gm::GalaxyModel, δL, s2, b) = bias_weight(δL, s2, gm.sigma2, gm.s2mean; b1=b[1], b2=b[2], bs2=b[3])
 

@@ -86,6 +86,64 @@ _lensing_loss(lc::LensingConstraint, gm, xg) =
 """    kappa_map(lc::LensingConstraint, gm, ω) -> κ::(ndir,)  — the differentiable CMB-lensing forward"""
 kappa_map(lc::LensingConstraint, gm::GalaxyModel, ω) = _kappa_model(lc, gm, _sheet_geometry(gm, ω)[1])
 
+"""
+Peculiar-velocity (cosmic-flows) constraint — a **dynamical, galaxy-bias-free**, local constraint on the
+field, complementary to the (biased) tracer point processes and the (integrated) lensing term.
+
+The model radial peculiar velocity at each tracer is read straight off the tetrahedral sheet: the sheet
+carries a velocity vector `v(q)=Σ_k f₁ D_k Ψ_k` at every vertex (`_sheet_geometry_v`), interpolated to the
+tracer positions with the same `interp_sheet_at_points` used for density — accurate up to shell crossing,
+i.e. exactly the quasi-linear regime Cosmicflows constrains. It is projected onto each tracer's radial
+direction and scaled by `vnorm = 100·a·E(a)` (comoving Mpc/h → km/s). Differentiable w.r.t. ω through the
+existing sheet rrules — no new primitive. The likelihood is Gaussian with inverse-variance `invN` (the
+distance-error velocity noise, which grows ∝ distance); `submean` marginalizes the monopole/zero-point."""
+struct VelocityConstraint{T<:AbstractFloat, P, C, V, V3}
+    pts::P               # (N,3) tracer real-space positions
+    cl::C                # cell list of pts
+    rhat::V3             # (N,3) radial unit vectors from the observer
+    v_obs::V             # (N,) observed radial peculiar velocity [km/s] (monopole removed if submean)
+    invN::V              # (N,) inverse variance [(km/s)^-2]
+    vnorm::T             # comoving Mpc/h → km/s
+    submean::Bool        # subtract the (inverse-variance-weighted) monopole before comparing
+end
+
+_wmean(x, w) = sum(w .* x) / sum(w)
+
+"""
+    velocity_constraint(gm, geom, cosmo, pts, v_obs; sigma_v=nothing, submean=true) -> VelocityConstraint
+
+Build a peculiar-velocity constraint. `pts` are the tracers' REAL-space box positions (from their
+distances), `v_obs` the observed radial peculiar velocities [km/s], `sigma_v` the per-tracer velocity
+errors [km/s] (uniform if omitted). The observer is the box centre (`geom.shift`)."""
+function velocity_constraint(gm::GalaxyModel{T}, geom, cosmo, pts::AbstractMatrix, v_obs::AbstractVector;
+                             sigma_v=nothing, submean::Bool=true) where {T}
+    P = T.(pts); N = size(P, 1); obs = vec(geom.shift)
+    d = P .- obs'; r = sqrt.(sum(d .^ 2; dims=2)); rh = T.(d ./ max.(r, T(1e-30)))
+    Om = cosmo.Omega_c + cosmo.Omega_b; a = geom.a_near              # low-z edge ≈ observation epoch
+    vnorm = 100 * a * sqrt(Om / a^3 + (1 - Om))                      # 100·a·E(a)  [km/s per Mpc/h]
+    iN = sigma_v === nothing ? ones(T, N) : T.(1 ./ Vector{Float64}(sigma_v) .^ 2)
+    vo = Vector{T}(v_obs); vo = submean ? vo .- T(_wmean(vo, iN)) : vo
+    return VelocityConstraint{T, Matrix{T}, typeof(build_cell_list(P, gm.boxsize/gm.res)), Vector{T}, Matrix{T}}(
+        P, build_cell_list(P, gm.boxsize/gm.res), rh, vo, iN, T(vnorm), submean)
+end
+
+# model radial peculiar velocity [km/s] at the tracers, from the shared geometry + velocity vector
+function _velocity_model(vc::VelocityConstraint, gm, xg, vg)
+    vx = interp_sheet_at_points(xg, vg[:, :, :, 1], vc.pts, vc.cl, gm.res)
+    vy = interp_sheet_at_points(xg, vg[:, :, :, 2], vc.pts, vc.cl, gm.res)
+    vz = interp_sheet_at_points(xg, vg[:, :, :, 3], vc.pts, vc.cl, gm.res)
+    return vc.vnorm .* (vx .* vc.rhat[:, 1] .+ vy .* vc.rhat[:, 2] .+ vz .* vc.rhat[:, 3])
+end
+function _velocity_loss(vc::VelocityConstraint, gm, xg, vg)
+    vm = _velocity_model(vc, gm, xg, vg)
+    vm = vc.submean ? vm .- _wmean(vm, vc.invN) : vm
+    return 0.5 * sum(vc.invN .* (vm .- vc.v_obs) .^ 2)
+end
+
+"""    radial_velocity(vc::VelocityConstraint, gm, ω) -> v_r::(N,) [km/s]  — the differentiable PV forward"""
+radial_velocity(vc::VelocityConstraint, gm::GalaxyModel, ω) =
+    (g = _sheet_geometry_v(gm, ω); _velocity_model(vc, gm, g[1], g[4]))
+
 """    tracer(gm, pts; b1, window, u=nothing) -> Tracer
 
 Build a tracer from box positions `pts` (N×3), linear bias `b1`, and a survey `window` (res³, e.g.
@@ -96,22 +154,25 @@ function tracer(gm::GalaxyModel{T}, pts::AbstractMatrix; b1::Real, window, u=not
     return Tracer(P, cl, Array{T,3}(window), T[b1, 0, 0], uu, T(sum(uu)))
 end
 
-struct MultiTracerProblem{T<:AbstractFloat, GM, TR, LC}
+struct MultiTracerProblem{T<:AbstractFloat, GM, TR, LC, VC}
     gm::GM
     tracers::TR                 # Vector{Tracer}
     lensing::LC                 # LensingConstraint or Nothing
+    velocity::VC                # VelocityConstraint or Nothing
     ρfloor::T
     floor_frac::T
 end
 
-"""    multitracer_problem(gm, tracers; lensing=nothing, ρfloor=1e-8, floor_frac=1e-3) -> MultiTracerProblem
+"""    multitracer_problem(gm, tracers; lensing=nothing, velocity=nothing, ρfloor=1e-8, floor_frac=1e-3)
 
 Joint problem over an arbitrary tracer list, optionally with a CMB-lensing convergence constraint
-(`lensing::LensingConstraint`) that adds an all-sky, unbiased, line-of-sight term to the field loss."""
-function multitracer_problem(gm::GalaxyModel{T}, tracers; lensing=nothing,
+(`lensing::LensingConstraint`, all-sky unbiased integrated) and/or a peculiar-velocity constraint
+(`velocity::VelocityConstraint`, dynamical bias-free local) — each adds a term to the field loss.
+The tracer list may be empty for a lensing- or velocity-only reconstruction."""
+function multitracer_problem(gm::GalaxyModel{T}, tracers; lensing=nothing, velocity=nothing,
                              ρfloor::Real=1e-8, floor_frac::Real=1e-3) where {T}
-    return MultiTracerProblem{T, typeof(gm), typeof(tracers), typeof(lensing)}(
-        gm, tracers, lensing, T(ρfloor), T(floor_frac))
+    return MultiTracerProblem{T, typeof(gm), typeof(tracers), typeof(lensing), typeof(velocity)}(
+        gm, tracers, lensing, velocity, T(ρfloor), T(floor_frac))
 end
 
 _model_T(::MultiTracerProblem{T}) where {T} = T
@@ -128,11 +189,21 @@ end
 
 Fixed-amplitude phase loss: the field `ω = phase_field(φ)` constrained by ALL tracers (sum of their
 point-process terms).  Differentiable w.r.t. `φ` (Zygote)."""
+# sum of the per-tracer point-process terms (handles an empty tracer list: lensing-/velocity-only)
+_tracer_losses(mtp, δL, s2, xg) = isempty(mtp.tracers) ? zero(_model_T(mtp)) :
+    sum(map(tr -> _tracer_pp_loss(mtp.gm, δL, s2, xg, tr, mtp.ρfloor, mtp.floor_frac), mtp.tracers))
+
 function multitracer_phase_loss(mtp::MultiTracerProblem, φ)
     ω = phase_field(φ)
-    xg, δL, s2 = _sheet_geometry(mtp.gm, ω)
-    l = sum(map(tr -> _tracer_pp_loss(mtp.gm, δL, s2, xg, tr, mtp.ρfloor, mtp.floor_frac), mtp.tracers))
-    return mtp.lensing === nothing ? l : l + _lensing_loss(mtp.lensing, mtp.gm, xg)
+    if mtp.velocity === nothing                          # no velocity term → skip the velocity vector
+        xg, δL, s2 = _sheet_geometry(mtp.gm, ω)
+        l = _tracer_losses(mtp, δL, s2, xg)
+        return mtp.lensing === nothing ? l : l + _lensing_loss(mtp.lensing, mtp.gm, xg)
+    else
+        xg, δL, s2, vg = _sheet_geometry_v(mtp.gm, ω)
+        l = _tracer_losses(mtp, δL, s2, xg) + _velocity_loss(mtp.velocity, mtp.gm, xg, vg)
+        return mtp.lensing === nothing ? l : l + _lensing_loss(mtp.lensing, mtp.gm, xg)
+    end
 end
 
 """

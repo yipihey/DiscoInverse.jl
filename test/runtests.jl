@@ -506,4 +506,38 @@ end
         end
     end
 
+    @testset "Peculiar-velocity constraint (CF4-style, sheet velocity)" begin
+        c = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        rng = MersenneTwister(0); Nr = 300
+        ra = 360 .* rand(rng, Nr); dec = rad2deg.(asin.(2 .* rand(rng, Nr) .- 1)); z = 0.1 .+ 0.9 .* rand(rng, Nr)
+        res = 16; geom = box_geometry((ra=ra, dec=dec, z=z), c; res=res, pad_frac=0.1); L = geom.boxsize
+        gm = galaxy_model(res, L, c, pk; R=max(2L/res, 80.0), observer=geom.observer,
+                          a_far=geom.a_far, a_near=geom.a_near, n_order=2, rsd=false)
+        ω = randn(MersenneTwister(1), res, res, res)
+        shift = vec(geom.shift); χn = comoving_distance(c, geom.a_near); χf = comoving_distance(c, geom.a_far)
+        Ng = 120; φg = π*(3 - sqrt(5))                                  # CF4-like tracers in the lightcone shell
+        dirs = [ (i2=i-1; y=1-2i2/(Ng-1); r=sqrt(max(0,1-y^2)); k==1 ? r*cos(φg*i2) : k==2 ? y : r*sin(φg*i2))
+                 for i in 1:Ng, k in 1:3 ]
+        rr = χn .+ (χf - χn) .* rand(MersenneTwister(3), Ng); pts = zeros(Ng, 3)
+        for p in 1:Ng; pts[p,:] = rr[p] .* dirs[p,:] .+ shift; end
+        # the differentiable radial-velocity forward
+        vc0 = velocity_constraint(gm, geom, c, pts, zeros(Ng); sigma_v=fill(150.0, Ng))
+        vr = radial_velocity(vc0, gm, ω)
+        @test length(vr) == Ng && all(isfinite, vr) && std(vr) > 0
+        @test 5 < std(vr) < 5000                                       # physically-scaled km/s, not runaway
+        if ad_ok
+            g = Zygote.gradient(w -> 0.5*sum(abs2, radial_velocity(vc0, gm, w)), ω)[1]
+            @test all(isfinite, g) && any(abs.(g) .> 0)                # ∂v_r/∂ω via the sheet velocity
+        end
+        # as a constraint toward mock v_obs = v_r(ω), velocity-only joint problem (empty tracer list)
+        vc = velocity_constraint(gm, geom, c, pts, vr; sigma_v=fill(150.0, Ng), submean=false)
+        mtp = multitracer_problem(gm, Tracer[]; velocity=vc)
+        φ0 = 2π .* rand(MersenneTwister(2), res ÷ 2 + 1, res, res)
+        @test isfinite(multitracer_phase_loss(mtp, φ0))
+        if ad_ok
+            gφ = Zygote.gradient(φ -> multitracer_phase_loss(mtp, φ), φ0)[1]
+            @test all(isfinite, gφ) && any(abs.(gφ) .> 0)
+        end
+    end
+
 end

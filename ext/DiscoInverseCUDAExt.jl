@@ -10,7 +10,7 @@ KA atomic-scatter deposit) — ~30× the CPU forward, ~33× the gradient (res=64
 module DiscoInverseCUDAExt
 
 using DiscoInverse
-using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem, Tracer, MultiTracerProblem, LensingConstraint
+using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem, Tracer, MultiTracerProblem, LensingConstraint, VelocityConstraint
 using DiscoDJNative
 using CUDA
 
@@ -60,10 +60,16 @@ DiscoInverse.gpu(lc::LensingConstraint) = LensingConstraint(
     CuArray(lc.pts), lc.cl, lc.nd, lc.ns, CuArray(lc.Wdχ), CuArray(lc.κ_obs), CuArray(lc.invN),
     CuArray(lc.ones3), lc.ρfloor)
 
+# cell list stays host (the deposit/interp kernels copy pts to the backend per call); rhat/v_obs/invN → device
+DiscoInverse.gpu(vc::VelocityConstraint) = VelocityConstraint(
+    CuArray(vc.pts), vc.cl, CuArray(vc.rhat), CuArray(vc.v_obs), CuArray(vc.invN), vc.vnorm, vc.submean)
+
 function DiscoInverse.gpu(mtp::MultiTracerProblem{T}) where {T}
     gmg = DiscoInverse.gpu(mtp.gm); trs = [DiscoInverse.gpu(tr) for tr in mtp.tracers]
     lc  = mtp.lensing === nothing ? nothing : DiscoInverse.gpu(mtp.lensing)
-    return MultiTracerProblem{T, typeof(gmg), typeof(trs), typeof(lc)}(gmg, trs, lc, mtp.ρfloor, mtp.floor_frac)
+    vc  = mtp.velocity === nothing ? nothing : DiscoInverse.gpu(mtp.velocity)
+    return MultiTracerProblem{T, typeof(gmg), typeof(trs), typeof(lc), typeof(vc)}(
+        gmg, trs, lc, vc, mtp.ρfloor, mtp.floor_frac)
 end
 
 end # module

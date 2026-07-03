@@ -48,6 +48,10 @@ can be optimized or sampled to match the data. Capabilities:
 - **CMB-lensing convergence constraint** — an all-sky, *unbiased* total-matter, line-of-sight constraint
   integrated natively through the sheet tessellation; pins the field where there are no tracers.
   (`LensingConstraint`, `kappa_map`)
+- **Peculiar-velocity (cosmic-flows) constraint** — a *dynamical, bias-free, local* constraint
+  (Cosmicflows-4): the tetrahedral sheet carries a velocity field, projected onto each tracer's radial
+  direction and compared to the observed peculiar velocity; breaks the growth–bias degeneracy.
+  (`VelocityConstraint`, `radial_velocity`)
 - **Field-level redshift reconstruction + calibrated redshift posteriors** — resolve photo-z along the
   line of sight; calibrate against spectroscopy and fold spec-z in as hard constraints.
   (`reconstruct_quaia`, `calibrate_photoz`, `radial_posterior_ensemble`, `coverage_pit`)
@@ -60,6 +64,7 @@ can be optimized or sampled to match the data. Capabilities:
 | constrained IC box | `box_geometry`, `constrained_ic_box`, `refine_phases`, `export_white_noise` |
 | multi-tracer joint field | `tracer`, `multitracer_problem`, `reconstruct_joint_field` |
 | CMB lensing | `lensing_constraint`, `kappa_map` |
+| peculiar velocity | `velocity_constraint`, `radial_velocity` |
 | Quaia redshifts | `quaia_problem`, `reconstruct_quaia`, `calibrate_photoz`, `radial_posterior_ensemble` |
 | inference | `map_optimize`, `phase_map_optimize`, `hmc_sample`, `nuts_sample` |
 
