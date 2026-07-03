@@ -144,6 +144,21 @@ end
 radial_velocity(vc::VelocityConstraint, gm::GalaxyModel, ω) =
     (g = _sheet_geometry_v(gm, ω); _velocity_model(vc, gm, g[1], g[4]))
 
+"""
+    velocity_amplitude(vc, gm, ω) -> (; amplitude, sigma)
+
+Best-fit amplitude `A` (∝ fσ₈ / fσ₈_fiducial) of the observed peculiar velocities relative to the fiducial-
+growth model at field `ω`, with its Gaussian error — the linear **density–velocity fσ₈ estimator**.  When `ω`
+is the density field constrained by *galaxies* (∝ bσ₈), fitting `A` to independent *velocities* measures
+fσ₈ separately from the bias — this is how peculiar velocities break the growth–bias degeneracy.  `A=1`
+means the flows match the fiducial-growth prediction."""
+function velocity_amplitude(vc::VelocityConstraint, gm::GalaxyModel, ω)
+    g = _sheet_geometry_v(gm, ω); vm = _velocity_model(vc, gm, g[1], g[4])
+    vm = vc.submean ? vm .- _wmean(vm, vc.invN) : vm
+    S = sum(vc.invN .* vm .^ 2)
+    return (amplitude = sum(vc.invN .* vm .* vc.v_obs) / S, sigma = 1 / sqrt(S))
+end
+
 """    tracer(gm, pts; b1, window, u=nothing) -> Tracer
 
 Build a tracer from box positions `pts` (N×3), linear bias `b1`, and a survey `window` (res³, e.g.

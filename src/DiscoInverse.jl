@@ -98,7 +98,7 @@ include("forward/constrained_box.jl")
 # ── Multi-tracer joint field reconstruction (Quaia + DESI + BOSS + eBOSS + …) ──
 export Tracer, tracer, MultiTracerProblem, multitracer_problem, multitracer_phase_loss, reconstruct_joint_field
 export LensingConstraint, lensing_constraint, kappa_map
-export VelocityConstraint, velocity_constraint, radial_velocity
+export VelocityConstraint, velocity_constraint, radial_velocity, velocity_amplitude
 include("forward/multitracer.jl")
 
 # ── Cosmicflows-4 IO + peculiar-velocity error model ──────────────────────────
