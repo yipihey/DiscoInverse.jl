@@ -101,4 +101,8 @@ export LensingConstraint, lensing_constraint, kappa_map
 export VelocityConstraint, velocity_constraint, radial_velocity
 include("forward/multitracer.jl")
 
+# ── Cosmicflows-4 IO + peculiar-velocity error model ──────────────────────────
+export CF4Catalog, load_cf4_groups, cf4_hubble, cf4_peculiar_velocity, cf4_box_geometry, cf4_velocity_constraint
+include("data/cf4_io.jl")
+
 end # module

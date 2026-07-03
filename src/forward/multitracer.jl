@@ -185,16 +185,12 @@ function _tracer_pp_loss(gm, δL, s2, xg, tr::Tracer, ρfloor, floor_frac)
     return -sum(tr.u .* log.(max.(ρg, ρfloor))) + tr.Utot * log(Z)
 end
 
-"""    multitracer_phase_loss(mtp, φ) -> scalar
-
-Fixed-amplitude phase loss: the field `ω = phase_field(φ)` constrained by ALL tracers (sum of their
-point-process terms).  Differentiable w.r.t. `φ` (Zygote)."""
 # sum of the per-tracer point-process terms (handles an empty tracer list: lensing-/velocity-only)
 _tracer_losses(mtp, δL, s2, xg) = isempty(mtp.tracers) ? zero(_model_T(mtp)) :
     sum(map(tr -> _tracer_pp_loss(mtp.gm, δL, s2, xg, tr, mtp.ρfloor, mtp.floor_frac), mtp.tracers))
 
-function multitracer_phase_loss(mtp::MultiTracerProblem, φ)
-    ω = phase_field(φ)
+# core data loss given the field ω (no prior) — shared by the fixed-amplitude MAP and the Gaussian-ω sampler
+function _mtp_data_loss(mtp::MultiTracerProblem, ω)
     if mtp.velocity === nothing                          # no velocity term → skip the velocity vector
         xg, δL, s2 = _sheet_geometry(mtp.gm, ω)
         l = _tracer_losses(mtp, δL, s2, xg)
@@ -205,6 +201,20 @@ function multitracer_phase_loss(mtp::MultiTracerProblem, φ)
         return mtp.lensing === nothing ? l : l + _lensing_loss(mtp.lensing, mtp.gm, xg)
     end
 end
+
+"""    multitracer_phase_loss(mtp, φ) -> scalar
+
+Fixed-amplitude (Angulo–Pontzen) MAP loss: the field `ω = phase_field(φ)` constrained by all tracers +
+any lensing/velocity terms.  Differentiable w.r.t. `φ` (Zygote)."""
+multitracer_phase_loss(mtp::MultiTracerProblem, φ) = _mtp_data_loss(mtp, phase_field(φ))
+
+"""    loss(mtp::MultiTracerProblem, ω, b) -> scalar
+
+Gaussian-ω posterior loss (data terms + ½‖ω‖² ΛCDM prior), the target for HMC/`nuts_sample`.  Samples the
+POSTERIOR over the field — honest UQ, where the fixed-amplitude MAP overfits low-SNR data (e.g. CF4
+peculiar velocities, σ_v ≫ signal).  Tracers carry their own fixed bias, so the sampler's `b`-block is a
+decoupled N(0,I) phantom (pass `b0=zeros(3)`); its samples are ignored."""
+loss(mtp::MultiTracerProblem, ω::AbstractArray, b) = _mtp_data_loss(mtp, ω) + gaussian_prior(ω) + 0.5 * sum(abs2, b)
 
 """
     reconstruct_joint_field(mtp, seed; device=identity, iters=35) -> (; ω, φ)

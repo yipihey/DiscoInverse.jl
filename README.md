@@ -65,8 +65,14 @@ can be optimized or sampled to match the data. Capabilities:
 | multi-tracer joint field | `tracer`, `multitracer_problem`, `reconstruct_joint_field` |
 | CMB lensing | `lensing_constraint`, `kappa_map` |
 | peculiar velocity | `velocity_constraint`, `radial_velocity` |
+| Cosmicflows-4 (PV) | `load_cf4_groups`, `cf4_peculiar_velocity`, `cf4_velocity_constraint` |
 | Quaia redshifts | `quaia_problem`, `reconstruct_quaia`, `calibrate_photoz`, `radial_posterior_ensemble` |
-| inference | `map_optimize`, `phase_map_optimize`, `hmc_sample`, `nuts_sample` |
+| MAP / posterior | `phase_map_optimize`, `map_optimize` · `nuts_sample`/`hmc_sample` on the Gaussian-ω `loss(mtp, ω, b)` |
+
+For low-S/N data (e.g. Cosmicflows-4, where σ_v ≫ signal beyond the Local Volume) the fixed-amplitude MAP
+overfits the distance noise; sample the posterior instead — `nuts_sample` on `loss(mtp, ω, b)` gives the
+honest field + its uncertainty.  A single `MultiTracerProblem` fuses galaxy tracers, a `LensingConstraint`,
+and a `VelocityConstraint` (biased positions + unbiased integrated + unbiased dynamical) in one field.
 
 ## Built on
 

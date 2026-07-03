@@ -540,4 +540,29 @@ end
         end
     end
 
+    @testset "CF4 error model + Gaussian-ω posterior loss (HMC target)" begin
+        c = fiducial_cosmology(); pk = linear_power_spectrum(c)
+        rng = MersenneTwister(0); N = 200                          # synthetic CF4-like catalog (no file)
+        ra = 360 .* rand(rng, N); dec = rad2deg.(asin.(2 .* rand(rng, N) .- 1)); dist = 5 .+ 95 .* rand(rng, N)
+        e_dm = fill(0.4, N); vcmb = 75 .* dist .+ 300 .* randn(rng, N); ngal = ones(N)
+        keep = dist .< 100.0                                       # (load_cf4_groups is just npzread + this filter)
+        cat = CF4Catalog{Float64}(ra[keep], dec[keep], dist[keep], e_dm[keep], vcmb[keep], ngal[keep])
+        @test length(cat) > 0
+        pv = cf4_peculiar_velocity(cat)                            # Malmquist increases distances
+        @test all(isfinite, pv.vpec) && all(pv.σv .> 0) && all(pv.dist .>= cat.dist) && pv.H0 > 0
+        res = 16; geom = cf4_box_geometry(cat, c; res=res)
+        gm = galaxy_model(res, geom.boxsize, c, pk; R=max(2geom.boxsize/res, 10.0), observer=geom.observer,
+                          a_far=geom.a_far, a_near=geom.a_near, n_order=2, rsd=false)
+        vc = cf4_velocity_constraint(gm, geom, c, cat)
+        @test length(vc.v_obs) == length(cat)
+        mtp = multitracer_problem(gm, Tracer[]; velocity=vc)
+        ω = randn(MersenneTwister(1), res, res, res)
+        L0 = loss(mtp, ω, zeros(3))                                # Gaussian-ω posterior loss (NUTS target)
+        @test isfinite(L0) && L0 > 0                               # includes the ½‖ω‖² prior
+        if ad_ok
+            g = Zygote.gradient(w -> loss(mtp, w, zeros(3)), ω)[1]
+            @test all(isfinite, g) && any(abs.(g) .> 0)
+        end
+    end
+
 end
