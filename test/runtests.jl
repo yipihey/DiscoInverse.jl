@@ -602,4 +602,24 @@ end
         @test cor(vec(irfft(rfft(crz.omega_mean) .* .!mask, res)), vec(ω_parent)) > 0.99
     end
 
+
+    @testset "Phase A: checkpointed shapes + Float32 path" begin
+        for T in (Float64, Float32)
+            c = fiducial_cosmology(); pkT = linear_power_spectrum(c)
+            res=16; L=T(400); obs=T[200,200,200]
+            gm = galaxy_model(res, L, c, pkT; R=T(50), observer=obs, a_far=T(0.6), a_near=T(0.95),
+                              n_order=2, rsd=false, T=T)
+            ω  = T.(0.3 .* randn(MersenneTwister(1), res, res, res))
+            gp = inject_mock_sheet(gm, ω, T[1.5,0,0], 3.0*res^3; seed=2)
+            mtp = multitracer_problem(gm, [tracer(gm, gp; b1=1.5, window=ones(T,res,res,res))])
+            f(w) = DiscoInverse._mtp_data_loss(mtp, w)
+            g = Zygote.gradient(f, ω)[1]
+            @test all(isfinite, g)
+            ε = T(cbrt(eps(T))); idx=(3,4,5)
+            e = zeros(T,res,res,res); e[idx...] = ε
+            fd = (f(ω .+ e) - f(ω .- e)) / (2ε)
+            @test isapprox(g[idx...], fd; rtol = T==Float32 ? 5e-2 : 1e-4)   # checkpointed grad == FD
+        end
+    end
+
 end

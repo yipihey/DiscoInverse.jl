@@ -18,13 +18,32 @@ rrules).  `inject_mock_sheet` samples a galaxy catalogue from the model for
 injection-recovery.
 """
 
+# ── Gradient checkpointing (the res ≥ 384 memory unlock) ──────────────────────
+# The nLPT core tapes ~6–9 de-aliasing-grid (ext=3res/2) arrays under Zygote — the single largest
+# tape block — and bias_fields tapes its 7 irfft intermediates. `Zygote.checkpointed` runs each
+# segment untaped in the forward and recomputes it during the backward: peak memory drops by the
+# segment tape for the price of one extra segment forward (~+30% gradient time).
+_shapes(fphi, K, n::Int)    = exact_shape_stack(compute_core_exact(fphi, K; n_order=n))
+# n_order=2 (production): STAGED checkpointing — ψ₁ (hand-rrule'd, tape-free) → checkpointed ψ₂ →
+# checkpointed real stack, so the backward holds only one stage's rematerialization at a time (the
+# res-512 unlock). Other orders: whole-segment checkpoint.
+function _shapes_ck(fphi, K, n::Int)
+    if n == 2
+        psi1 = DiscoDJNative._psi1_fourier(K, fphi)
+        psi2 = psi2_fourier(K, psi1)
+        return shape_stack_2lpt(K, psi1, psi2)
+    end
+    return Zygote.checkpointed(_shapes, fphi, K, n)
+end
+_biasf_ck(fphi, ops)        = Zygote.checkpointed(bias_fields, fphi, ops)
+
 # Shared, BIAS-INDEPENDENT geometry: ω → (x_obs vertices on the lightcone, δ_L, s²). Computed once and
 # reused across tracers of different bias in the multi-tracer forward (forward/multitracer.jl); the
 # expensive LPT + lightcone happen here, only the per-vertex weight below depends on the bias.
 function _sheet_geometry(gm::GalaxyModel{T}, ω::AbstractArray{T,3}) where {T}
     fphi   = white_noise_to_fphi(gm.op, ω)
-    Psi    = exact_shape_stack(compute_core_exact(fphi, gm.K; n_order=gm.n_order))
-    δL, s2 = bias_fields(fphi, gm.ops)
+    Psi    = _shapes_ck(fphi, gm.K, gm.n_order)
+    δL, s2 = _biasf_ck(fphi, gm.ops)
     lc     = lightcone_cross_ad(Psi, gm.qflat, gm.cosmo, gm.observer, gm.a_far, gm.a_near; rsd=gm.rsd)
     x      = lc.x_obs
     if gm.rsd
@@ -41,8 +60,8 @@ end
 # vg = Σ_k f₁ D_k Ψ_k is the comoving-velocity vector (×100·a·E(a) → km/s).  Differentiable in ω.
 function _sheet_geometry_v(gm::GalaxyModel{T}, ω::AbstractArray{T,3}) where {T}
     fphi   = white_noise_to_fphi(gm.op, ω)
-    Psi    = exact_shape_stack(compute_core_exact(fphi, gm.K; n_order=gm.n_order))
-    δL, s2 = bias_fields(fphi, gm.ops)
+    Psi    = _shapes_ck(fphi, gm.K, gm.n_order)
+    δL, s2 = _biasf_ck(fphi, gm.ops)
     lc     = lightcone_cross_ad(Psi, gm.qflat, gm.cosmo, gm.observer, gm.a_far, gm.a_near; rsd=false, velocity=true)
     return reshape(lc.x_obs, gm.res, gm.res, gm.res, 3), δL, s2, reshape(lc.v_vec, gm.res, gm.res, gm.res, 3)
 end

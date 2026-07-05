@@ -23,13 +23,15 @@ using Random: MersenneTwister
 
 # minimize ½‖ω − ω_c‖² + data_loss(mtp, ω), warm-started at ω0.  LBFGS handles the stiff Wiener geometry
 # that collapses identity-mass HMC; backtracking line search keeps forward evals per step low.
-function _wiener_map(mtp::MultiTracerProblem, ω0, ω_c; iters::Int=200)
+# `m` = LBFGS history length: the history costs 2m state-sized vectors on the device (at 512³ F32 that is
+# ~1.1 GB per pair), and these smooth objectives converge just as well at m=8 — keep m small at high res.
+function _wiener_map(mtp::MultiTracerProblem, ω0, ω_c; iters::Int=200, m::Int=8)
     f(ω) = _mtp_data_loss(mtp, ω) + 0.5 * sum(abs2, ω .- ω_c)
     function g!(G, ω)
         G .= Zygote.gradient(w -> _mtp_data_loss(mtp, w), ω)[1] .+ (ω .- ω_c)
         return G
     end
-    r = optimize(f, g!, ω0, LBFGS(m=20, linesearch=Optim.LineSearches.BackTracking(order=2)),
+    r = optimize(f, g!, ω0, LBFGS(m=m, linesearch=Optim.LineSearches.BackTracking(order=2)),
                  Options(iterations=iters, g_tol=1e-7))
     return minimizer(r)
 end
@@ -39,9 +41,9 @@ _perturb_velocity(vc::VelocityConstraint, εd) =
     VelocityConstraint(vc.pts, vc.cl, vc.rhat, vc.v_obs .+ εd, vc.invN, vc.vnorm, vc.submean)
 
 """    wiener_mean(mtp; iters=200, device=identity) -> ω  — the posterior-mean field (Wiener filter)."""
-function wiener_mean(mtp::MultiTracerProblem{T}; iters::Int=200, device=identity) where {T}
+function wiener_mean(mtp::MultiTracerProblem{T}; iters::Int=200, device=identity, m::Int=8) where {T}
     ω0 = device(zeros(T, mtp.gm.res, mtp.gm.res, mtp.gm.res))
-    return Array(_wiener_map(mtp, ω0, ω0; iters=iters))
+    return Array(_wiener_map(mtp, ω0, ω0; iters=iters, m=m))
 end
 
 """
@@ -52,7 +54,7 @@ for the near-linear-Gaussian model, without the stiff-geometry HMC.  `omega_mean
 `omega_std` the per-voxel posterior uncertainty, `draws` the constrained realizations (host arrays).
 `device=CuArray` runs each MAP on the GPU."""
 function constrained_realizations(mtp::MultiTracerProblem{T}, K::Int;
-                                  iters::Int=200, device=identity, seed::Int=0) where {T}
+                                  iters::Int=200, device=identity, seed::Int=0, m::Int=8) where {T}
     res = mtp.gm.res; vc = mtp.velocity
     vc === nothing && error("constrained_realizations requires a velocity constraint")
     σ = Array(1 ./ sqrt.(vc.invN))                       # per-group velocity noise σ_v (host)
@@ -63,7 +65,7 @@ function constrained_realizations(mtp::MultiTracerProblem{T}, K::Int;
         εd  = device(T.(randn(rng, length(σ)) .* σ))      # noise draw ε_d ~ N(0, σ_v²)
         mtpp = multitracer_problem(mtp.gm, mtp.tracers; lensing=mtp.lensing,
                                    velocity=_perturb_velocity(vc, εd), ρfloor=mtp.ρfloor, floor_frac=mtp.floor_frac)
-        draws[k] = Array(_wiener_map(mtpp, εp, εp; iters=iters))
+        draws[k] = Array(_wiener_map(mtpp, εp, εp; iters=iters, m=m))
     end
     A = cat(draws...; dims=4)
     return (omega_mean = dropdims(mean(A; dims=4); dims=4),
@@ -89,7 +91,7 @@ modes are preserved bit-exactly). Above the split the field is pinned by the fin
 is a fresh ΛCDM draw where it doesn't. Optimized with LBFGS (backtracking) through the sheet forward + an
 FFT high-pass projection; the ½‖ω_high‖² prior acts only on the free modes."""
 function constrained_zoom(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem, k_split_frac::Real;
-                          iters::Int=150) where {T}
+                          iters::Int=150, m::Int=8) where {T}
     N = size(ω_parent, 1)
     m0    = _highpass_mask(N, k_split_frac)
     mask  = similar(ω_parent, Bool, size(m0)); copyto!(mask, m0)   # to ω_parent's backend (host/CuArray)
@@ -100,7 +102,7 @@ function constrained_zoom(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem
     g!(G, θ) = (G .= Zygote.gradient(f, θ)[1]; G)
     θ0 = fill!(similar(ω_parent), zero(T))
     r = optimize(f, g!, θ0,
-                 LBFGS(m=15, linesearch=Optim.LineSearches.BackTracking(order=2)),
+                 LBFGS(m=m, linesearch=Optim.LineSearches.BackTracking(order=2)),
                  Options(iterations=iters))
     return ω_low .+ hp(minimizer(r))
 end
@@ -116,7 +118,7 @@ posterior over the free modes — where a single MAP overfits noise-dominated da
 flow).  `omega_mean` is the Wiener zoom; `omega_std` the fine-scale uncertainty.  Runs on the GPU when
 `ω_parent`/`mtp` are device-resident."""
 function constrained_zoom_realizations(ω_parent::AbstractArray{T,3}, mtp::MultiTracerProblem,
-                                       k_split_frac::Real, K::Int; iters::Int=150, seed::Int=0) where {T}
+                                       k_split_frac::Real, K::Int; iters::Int=150, seed::Int=0, m::Int=8) where {T}
     N = size(ω_parent, 1); vc = mtp.velocity
     vc === nothing && error("constrained_zoom_realizations requires a velocity constraint")
     m0 = _highpass_mask(N, k_split_frac); mask = similar(ω_parent, Bool, size(m0)); copyto!(mask, m0)
@@ -132,7 +134,7 @@ function constrained_zoom_realizations(ω_parent::AbstractArray{T,3}, mtp::Multi
                                    ρfloor=mtp.ρfloor, floor_frac=mtp.floor_frac)
         f(θ)  = _mtp_data_loss(mtpp, ω_low .+ hp(θ)) + 0.5 * sum(abs2, hp(θ) .- εph)
         g!(G, θ) = (G .= Zygote.gradient(f, θ)[1]; G)
-        r = optimize(f, g!, copy(εp), LBFGS(m=15, linesearch=Optim.LineSearches.BackTracking(order=2)),
+        r = optimize(f, g!, copy(εp), LBFGS(m=m, linesearch=Optim.LineSearches.BackTracking(order=2)),
                      Options(iterations=iters))
         draws[k] = Array(ω_low .+ hp(minimizer(r)))
     end
