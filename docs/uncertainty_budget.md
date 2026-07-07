@@ -30,33 +30,43 @@ Report three things, per |k|-band:
    - **Bias amplitude** (b₁ ± ~20%) and **bias shape** (drop b₂,b_s² → linear).
    The reported bar is `max(statistical, systematic)` per band (or quadrature).
 
-## Production numbers (res=96, R=8.3 Mpc ≈ 2 voxels, true bias [1.8, 0.5, 0.3], GPU F32)
+## Production numbers (res=192, L=768, R=8 Mpc ≈ 2 voxels, GPU F32, mean of 2 realizations)
 
-σ relative to each band's own fiducial amplitude (`scratch/ubudget_res96.npz`):
+σ relative to each band's own fiducial amplitude (`scratch/ubudget_res192.npz`, figure
+`scratch/uncertainty_budget_res192.png`). Reconstruction is faithful (r>0.9) out to **k ≈ 0.73 h/Mpc**;
+beyond that the field is prior-dominated and the ratios diverge (÷ vanishing amplitude) — not meaningful.
 
-| band | r(k) | statistical | LPT (2↔3) | drop b₂,b_s² | **b₁ ±20%** |
+| k [h/Mpc] | r(k) | statistical | LPT (2↔3) | b₂,b_s² shape | **b₁ ±20%** |
 |---|---|---|---|---|---|
-| 1–2 (large) | 1.00 | 0.04–0.07 | 0.05–0.11 | 0.04–0.10 | **0.16–0.18** |
-| 3–5 | ~1.00 | 0.07–0.10 | 0.07–0.09 | 0.05–0.07 | **0.32–0.39** |
-| 6 | 0.94 | 0.13 | 0.10 | 0.08 | **0.44** |
-| 7 | 0.71 | 0.17 | 0.11 | 0.09 | **0.48** |
-| 8–10 (small) | 0.44→0.04 | 0.20–0.24 | 0.12 | 0.10–0.12 | **0.52–0.56** |
+| 0.05 | 0.97 | 0.10 | 0.15 | 0.10 | **0.20** |
+| 0.15 | 0.94 | 0.05 | 0.07 | 0.04 | **0.14** |
+| 0.24 | 0.97 | 0.06 | 0.10 | 0.04 | **0.29** |
+| 0.34 | 0.98 | 0.06 | 0.11 | 0.04 | **0.36** |
+| 0.44 | 0.98 | 0.06 | 0.13 | 0.04 | **0.38** |
+| 0.53 | 0.96 | 0.07 | 0.14 | 0.05 | **0.39** |
+| 0.63 | 0.95 | 0.09 | 0.17 | 0.07 | **0.41** |
+| 0.73 | 0.95 | 0.12 | 0.22 | 0.11 | **0.44** |
 
-**Hierarchy on trustworthy scales (r > 0.9): b₁-amplitude (0.16–0.44) ≫ statistical ≈ LPT ≈ b₂,b_s²-shape
-(all < 0.13).** Reading:
+**Hierarchy on trustworthy scales (r > 0.9, k ≲ 0.73): b₁-amplitude (0.14–0.44) ≫ LPT (0.07–0.22) >
+statistical (0.05–0.12) ≈ b₂,b_s²-shape (0.04–0.11).**
 
-- **The bias *amplitude* (b₁) is the dominant uncertainty by far — 16→56%**, growing with k, swamping
-  everything else beyond the largest scales. This is the b₁–field-amplitude degeneracy: the data constrains
-  b₁·δ, so a b₁ error maps almost directly onto δ. ⇒ **pinning/marginalizing b₁ is the single most important
-  thing for a reliable reconstruction** — far more than nonlinear-bias shape, LPT order, or the statistical
-  posterior.
-- **The reconstruction is statistically *tight* where constrained** — stat is only 4–13% on bands 1–6
-  (r>0.9). (Report r(k) as the map of *where* it's trustworthy; the per-band statistical bar is small there.)
-- **Nonlinear bias *shape* (b₂,b_s²) is real but modest (4–12%)** and subdominant to b₁-amplitude.
-- **2LPT vs 3LPT stays small (5–12%)** — "little difference," confirmed at production res.
+- **The bias *amplitude* (b₁) is the dominant uncertainty by far — 14→44%**, growing with k, swamping
+  everything else. This is the b₁–field-amplitude degeneracy: the data constrains b₁·δ, so a b₁ error maps
+  almost directly onto δ. ⇒ **pinning/marginalizing b₁ (jointly with the field amplitude) is the single most
+  important thing for a reliable reconstruction** — more than any of the other terms combined.
+- **LPT order (2↔3) is the *second* systematic — 7–22%, growing toward smaller scales**, and is **not**
+  negligible at production resolution. (A res-96 pass gave 5–12%; the res-8 pilot gave ~2% — the LPT
+  systematic *grows with resolution* as the 3LPT correction resolves. Note the 3LPT variant was warm-started
+  from the 2LPT solution and lightly iterated, so these are a lower bound.) So "2LPT vs 3LPT makes little
+  difference" holds only at coarse resolution; at production res it is the runner-up term.
+- **The reconstruction is statistically *tight* where constrained** — stat is 5–12%. Report r(k) as the map
+  of *where* it's trustworthy; the statistical bar is small there.
+- **Nonlinear bias *shape* (b₂,b_s²) is small on constrained scales (4–11%)** — comparable to statistical,
+  subdominant to both b₁-amplitude and LPT order.
 
-All terms are tens-of-percent, so a tens-of-percent error bar is the *correct* precision — but the term that
-sets it is **b₁**, not the statistical width.
+All constrained-scale terms are tens-of-percent, so a tens-of-percent error bar is the *correct* precision.
+Two realizations agree, so this hierarchy is robust — the term that *sets* the budget is **b₁**, with **LPT
+order second**; the statistical width and nonlinear-bias shape are the least of the worries.
 
 ### ⚠ Why res-8 is not enough (a cautionary result)
 
