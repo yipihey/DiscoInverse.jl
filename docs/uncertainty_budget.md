@@ -30,35 +30,55 @@ Report three things, per |k|-band:
    - **Bias amplitude** (b₁ ± ~20%) and **bias shape** (drop b₂,b_s² → linear).
    The reported bar is `max(statistical, systematic)` per band (or quadrature).
 
-## Demonstrated numbers (res=8 pilot, true bias [1.8, 0.5, 0.3], data-dominated)
+## Production numbers (res=96, R=8.3 Mpc ≈ 2 voxels, true bias [1.8, 0.5, 0.3], GPU F32)
 
-σ relative to each band's own fiducial amplitude:
+σ relative to each band's own fiducial amplitude (`scratch/ubudget_res96.npz`):
 
-| band | r(k) | statistical | LPT (2↔3) | drop b₂,b_s² | b₁ ±20% |
+| band | r(k) | statistical | LPT (2↔3) | drop b₂,b_s² | **b₁ ±20%** |
 |---|---|---|---|---|---|
-| 1 (largest) | **+0.91** | 0.50 | 0.15 | 0.02 | 0.08 |
-| 2 | +0.56 | 0.89 | 0.30 | 0.01 | 0.08 |
-| 3 | +0.25 | 1.01 | 0.37 | 0.01 | 0.15 |
-| 4 (smallest) | −0.03 | 0.89 | 0.39 | 0.01 | 0.18 |
+| 1–2 (large) | 1.00 | 0.04–0.07 | 0.05–0.11 | 0.04–0.10 | **0.16–0.18** |
+| 3–5 | ~1.00 | 0.07–0.10 | 0.07–0.09 | 0.05–0.07 | **0.32–0.39** |
+| 6 | 0.94 | 0.13 | 0.10 | 0.08 | **0.44** |
+| 7 | 0.71 | 0.17 | 0.11 | 0.09 | **0.48** |
+| 8–10 (small) | 0.44→0.04 | 0.20–0.24 | 0.12 | 0.10–0.12 | **0.52–0.56** |
 
-**Hierarchy on the constrained scales (r > 0.5): statistical (≥0.50) ≫ LPT (~0.15) ≈ b₁-amplitude (~0.08)
-≫ b₂,b_s² shape (~0.02).** Reading:
+**Hierarchy on trustworthy scales (r > 0.9): b₁-amplitude (0.16–0.44) ≫ statistical ≈ LPT ≈ b₂,b_s²-shape
+(all < 0.13).** Reading:
 
-- **Statistical uncertainty dominates every band** — even where the field is best reconstructed (r=0.91),
-  the statistical width is 50% of the band amplitude. The reconstruction is prior-dominated except at the
-  largest scales. ⇒ *lead with r(k).*
-- **The nonlinear bias *shape* (b₂, b_s²) is negligible (1–2%)** at the quasi-linear scales we constrain —
-  dropping it (our production default) costs almost nothing. What matters is the bias **amplitude** b₁
-  (8–18%), because b₁ is degenerate with the field amplitude.
-- **LPT order barely matters on constrained scales** (0.15, and it never changes r(k₁)) — "2LPT vs 3LPT
-  makes little difference," now with a number. Its apparent growth to small scales is in the already-
-  unconstrained (r<0) modes and is partly grid noise.
+- **The bias *amplitude* (b₁) is the dominant uncertainty by far — 16→56%**, growing with k, swamping
+  everything else beyond the largest scales. This is the b₁–field-amplitude degeneracy: the data constrains
+  b₁·δ, so a b₁ error maps almost directly onto δ. ⇒ **pinning/marginalizing b₁ is the single most important
+  thing for a reliable reconstruction** — far more than nonlinear-bias shape, LPT order, or the statistical
+  posterior.
+- **The reconstruction is statistically *tight* where constrained** — stat is only 4–13% on bands 1–6
+  (r>0.9). (Report r(k) as the map of *where* it's trustworthy; the per-band statistical bar is small there.)
+- **Nonlinear bias *shape* (b₂,b_s²) is real but modest (4–12%)** and subdominant to b₁-amplitude.
+- **2LPT vs 3LPT stays small (5–12%)** — "little difference," confirmed at production res.
 
-All terms are comfortably tens-of-percent — so a tens-of-percent error bar is not just adequate, it is the
-*correct* precision. Finer would be false.
+All terms are tens-of-percent, so a tens-of-percent error bar is the *correct* precision — but the term that
+sets it is **b₁**, not the statistical width.
 
-Caveat: these are res-8 pilot magnitudes; the **hierarchy** (statistical ≫ systematics; shape ≪ amplitude)
-is the robust, transferable result. Absolute numbers shift with resolution, smoothing R, and tracer density.
+### ⚠ Why res-8 is not enough (a cautionary result)
+
+An earlier res-8 / R=40 pilot gave the **opposite** conclusion — "statistical dominates (≥0.50), bias shape
+negligible (0.02)." Both were artifacts: res-8 is prior-starved (few constrained modes → inflated
+statistical width), and R=40 (box/10) over-smoothed the density so the nonlinear-bias terms vanished. The
+lesson: **this budget must be run at production resolution with R ≈ 2 voxels** — a small-box pilot inverts
+the hierarchy and is actively misleading. The res-96 numbers above are the ones to trust; higher res would
+refine but not change the b₁-dominated conclusion.
+
+## Performance
+
+At res-8 CPU a single MAP was ~80 s; a res-96 budget (≈13 reconstructions) on CPU would be *hours*. The
+enabling move is **GPU + Float32**: the whole budget runs in **~4–5 min** (fiducial 24 s steady after
+compile; warm variants ~10–20 s each; K=8 bootstrap ~80 s). Levers, in order of impact:
+- **GPU + F32** — the decisive one (makes production res feasible at all).
+- **Warm-start every variant/bootstrap from the fiducial ω** — they are perturbations, so ~8–10 L-BFGS iters
+  suffice instead of 45–60 (used here; could be cut further).
+- Build the device `GalaxyModel` **once** and reuse it (was rebuilt per reconstruction) — minor here
+  (`gpu(gm)` is ~0.3 s) but tidy; the real per-iter cost is the sheet forward+gradient (~0.4–0.5 s/iter at
+  res 96, dominated by the L-BFGS line search doing a few evals/iter). 3LPT variants cost ~2× the 2LPT ones.
+- K need only be ~6–8 for a tens-of-% statistical width; more is wasted.
 
 ## Usage
 
