@@ -16,7 +16,7 @@ The radius depends on the filter (same mass, different shape):
 |---|---|---|---|
 | **top-hat** | (4π/3)·ρ̄·R³ | **8.440** | 5.685 |
 | **Gaussian** (used by the code's `W_R`) | (2π)^{3/2}·ρ̄·R³ | **5.428** | 3.656 |
-| cubic cell | ρ̄·R³ | 6.766 | 4.558 |
+| cubic cell (side) | ρ̄·L³ | 13.606 | 9.166 |
 
 R_TH/R_G = 1.555. The forward's bias smoothing is a **Gaussian** filter, so the value fed to
 `galaxy_model` is the Gaussian **R = 3.656 Mpc/h**; the top-hat 8.44 Mpc is the same mass in the
