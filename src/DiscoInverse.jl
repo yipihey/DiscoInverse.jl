@@ -35,7 +35,7 @@ export gpu
 
 # ── Forward: 2nd-order Lagrangian bias ────────────────────────────────────────
 export BiasOperators, bias_operators, bias_fields, bias_weight, bias_moments
-export ANCHOR_MASS, smoothing_from_mass, mass_from_smoothing, tophat_radius_from_mass
+export ANCHOR_MASS, cube_mass, cube_side_from_mass, anchor_cube_side
 include("forward/bias.jl")
 
 # ── Forward: galaxy field on the lightcone ────────────────────────────────────

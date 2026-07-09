@@ -604,22 +604,30 @@ end
 
 
     @testset "Phase A: checkpointed shapes + Float32 path" begin
-        for T in (Float64, Float32)
-            c = fiducial_cosmology(); pkT = linear_power_spectrum(c)
-            res=16; L=T(400); obs=T[200,200,200]
-            gm = galaxy_model(res, L, c, pkT; R=T(50), observer=obs, a_far=T(0.6), a_near=T(0.95),
-                              n_order=2, rsd=false, T=T)
-            ω  = T.(0.3 .* randn(MersenneTwister(1), res, res, res))
-            gp = inject_mock_sheet(gm, ω, T[1.5,0,0], 3.0*res^3; seed=2)
-            mtp = multitracer_problem(gm, [tracer(gm, gp; b1=1.5, window=ones(T,res,res,res))])
-            f(w) = DiscoInverse._mtp_data_loss(mtp, w)
-            g = Zygote.gradient(f, ω)[1]
-            @test all(isfinite, g)
-            ε = T(cbrt(eps(T))); idx=(3,4,5)
-            e = zeros(T,res,res,res); e[idx...] = ε
-            fd = (f(ω .+ e) - f(ω .- e)) / (2ε)
-            @test isapprox(g[idx...], fd; rtol = T==Float32 ? 5e-2 : 1e-4)   # checkpointed grad == FD
-        end
+        c = fiducial_cosmology()
+        res=16; L=400.0; obs=[200.0,200,200]; b=[1.5,0.0,0.0]
+        # F64 ground truth: checkpointed analytic gradient == F64 finite-difference (exact)
+        gm64 = galaxy_model(res, L, c, linear_power_spectrum(c); R=L/res, observer=obs,
+                            a_far=0.6, a_near=0.95, n_order=2, rsd=false)   # cubic cell = grid spacing
+        ω   = 0.3 .* randn(MersenneTwister(1), res, res, res)
+        gp  = inject_mock_sheet(gm64, ω, b, 3.0*res^3; seed=2)
+        mtp64 = multitracer_problem(gm64, [tracer(gm64, gp; b1=1.5, window=ones(res,res,res))])
+        f64(w) = DiscoInverse._mtp_data_loss(mtp64, w)
+        g64 = Zygote.gradient(f64, ω)[1]
+        @test all(isfinite, g64)
+        ε = cbrt(eps(Float64)); idx=(3,4,5); e = zeros(res,res,res); e[idx...] = ε
+        @test isapprox(g64[idx...], (f64(ω .+ e) - f64(ω .- e)) / (2ε); rtol = 1e-4)
+        # F32 checkpointed path reproduces the F64 gradient (an F32 finite-difference is
+        # cancellation-noise-dominated for this large-magnitude loss, so validate F32-analytic
+        # against the F64-analytic ground truth, field-level).
+        T = Float32
+        gm32 = galaxy_model(res, T(L), c, linear_power_spectrum(c); R=T(L/res), observer=T.(obs),
+                            a_far=T(0.6), a_near=T(0.95), n_order=2, rsd=false, T=T)
+        mtp32 = multitracer_problem(gm32, [tracer(gm32, T.(gp); b1=1.5, window=ones(T,res,res,res))])
+        g32 = Zygote.gradient(w -> DiscoInverse._mtp_data_loss(mtp32, w), T.(ω))[1]
+        @test all(isfinite, g32)
+        @test cor(vec(Float64.(g32)), vec(g64)) > 0.999                 # F32 path matches F64 gradient
+        @test sqrt(sum(abs2, Float64.(g32) .- g64) / sum(abs2, g64)) < 5e-2   # to F32 precision
     end
 
 end
