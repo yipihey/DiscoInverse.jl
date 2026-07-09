@@ -45,6 +45,46 @@ function bias_operators(res::Int, boxsize::Real, R::Real; T::Type{<:AbstractFloa
     return bias
 end
 
+# ── Fixed physical Lagrangian mass scale ──────────────────────────────────────
+# The sheet's smallest resolved scale is anchored to an ABSOLUTE Lagrangian mass (solar
+# masses, no little-h) so that bias and LPT-order comparisons are made at one fixed physical
+# scale across resolutions, boxes, and surveys. The chosen anchor (Tom, 2026-07): the Gaussian
+# filter mass M = ρ̄_m (2π)^{3/2} R³ = 1e14 M⊙, giving R_G ≈ 5.43 physical Mpc (3.66 Mpc/h at
+# Planck-2018 h). At z=1 this scale is ~linear (~0.1% of the sheet mass shell-crossed) and 2LPT
+# vs 3LPT agree to ~1.3%; at z=0 ~6% has shell-crossed. Set the `galaxy_model` smoothing to
+# `smoothing_from_mass(ANCHOR_MASS, cosmo)` and use a grid fine enough to resolve it (Δq ≲ R/1.8).
+const ANCHOR_MASS = 1e14        # M⊙ (physical, no h) — the fixed Lagrangian mass scale
+
+"""    smoothing_from_mass(M_sun, cosmo) -> R [Mpc/h]
+
+Gaussian Lagrangian smoothing whose enclosed mass M = ρ̄_m·(2π)^{3/2}·R³ equals `M_sun`
+(physical solar masses, no h).  ρ̄_m = Ω_m·ρ_crit,0 with ρ_crit,0 = 2.775e11·h² M⊙/Mpc³.
+Inverse of [`mass_from_smoothing`]."""
+function smoothing_from_mass(M_sun::Real, cosmo)
+    Ωm = cosmo.Omega_c + cosmo.Omega_b
+    ρm = Ωm * 2.775e11 * cosmo.h^2                 # physical M⊙/Mpc³
+    Rphys = cbrt(M_sun / (ρm * (2π)^1.5))          # physical Mpc
+    return Rphys * cosmo.h                          # Mpc/h (box units)
+end
+
+"""    mass_from_smoothing(R_h, cosmo) -> M [M⊙]  — Gaussian-filter Lagrangian mass of scale `R_h` [Mpc/h]."""
+function mass_from_smoothing(R_h::Real, cosmo)
+    Ωm = cosmo.Omega_c + cosmo.Omega_b
+    ρm = Ωm * 2.775e11 * cosmo.h^2
+    return ρm * (2π)^1.5 * (R_h / cosmo.h)^3
+end
+
+"""    tophat_radius_from_mass(M_sun, cosmo) -> R_TH [phys Mpc]
+
+Real-space top-hat radius, M = (4π/3)·ρ̄_m·R³ (the Press-Schechter/halo mass radius).  For the
+ANCHOR_MASS=1e14 M⊙ at Planck-2018 this is 8.44 physical Mpc (vs the Gaussian smoothing 5.43
+phys Mpc = R_TH/1.555 that the code's `W_R` actually applies)."""
+function tophat_radius_from_mass(M_sun::Real, cosmo)
+    Ωm = cosmo.Omega_c + cosmo.Omega_b
+    ρm = Ωm * 2.775e11 * cosmo.h^2                 # physical M⊙/Mpc³
+    return cbrt(3 * M_sun / (4π * ρm))             # physical Mpc
+end
+
 # Device-aware irfft (CPU [3,1,2]; CuArray permute-wrapped via the DiscoDJNative ext).
 _irfftn(f, res) = DiscoDJNative._irfftn(f, res)
 
