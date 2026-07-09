@@ -56,3 +56,23 @@ gm = galaxy_model(res, res*L, c, pk; R=L, ...)   # R is the cubic-cell side; gri
 the pure anchor, choose the box/res so **Δq = boxsize/res = anchor_cube_side(cosmo)** — then the grid cell
 *is* the mass cube and the filter matches the tessellation exactly. The physical mass stays 16×10¹³ M⊙ at
 every resolution/box and under any cosmology because it is the fixed primitive.
+
+## Uncertainty budget at the fixed cubic cell (first re-run)
+
+Re-running the budget with everything on the 16×10¹³ M⊙ cubic cell (cubic filter, grid cell = the
+cube, Planck 2018, res 96, 2 realizations; `scratch/ubudget_cube16e13.{npz,png}`): the reconstruction is
+faithful (r>0.9) essentially to the **cube Nyquist** (k ≈ 0.32 h/Mpc), and on the constrained bands the
+systematic budget is:
+
+| source | σ/band on constrained scales |
+|---|---|
+| bias amplitude (b₁±20%) | 0.21–0.73 |
+| LPT order (2↔3) | 0.19–0.54 |
+| **nonlinear bias shape (b₂,b_s²)** | **0.20–0.40** |
+| statistical | 0.20–0.71 |
+
+**Key change from the Gaussian budget:** the nonlinear-bias *shape* (b₂,b_s²) is now a **significant
+systematic (~0.3)**, where it was negligible (~0.05) with a Gaussian filter. The sharp cubic cutoff keeps
+the near-cube-scale power where b₂δ² operates, so **at the fixed cubic cell the nonlinear bias must be
+modelled** — you cannot drop b₂/b_s². (Caveat: res 96 / 2 realizations is noisy — the largest-scale band
+is mode-starved; refine on GPU when free for the production numbers.)
