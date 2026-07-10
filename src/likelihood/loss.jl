@@ -24,11 +24,12 @@ InferenceProblem{T,GM}(gm, W, mask, n_obs, ntot, b0, σb, λfloor, data_var=noth
 
 """    galaxy_model_for(geom, pk_table; R, n_order=3, n_sub=1, rsd=false, ref_seed=0)"""
 function galaxy_model_for(geom::BoxGeometry, pk_table::Dict;
-                          R::Real, n_order::Int=3, n_sub::Int=1, rsd::Bool=false, ref_seed::Int=0)
+                          R::Real, n_order::Int=3, n_sub::Int=1, rsd::Bool=false, ref_seed::Int=0,
+                          ext::Union{Nothing,Int}=nothing)
     T = eltype(geom.shift)
     galaxy_model(geom.res, geom.boxsize, geom.cosmo, pk_table; R=R, observer=geom.observer,
                  a_far=geom.a_far, a_near=geom.a_near, n_order=n_order, n_sub=n_sub,
-                 rsd=rsd, ref_seed=ref_seed, T=T)
+                 rsd=rsd, ref_seed=ref_seed, ext=ext, T=T)
 end
 
 """

@@ -50,10 +50,12 @@ from a `ref_seed` white-noise draw.
 function galaxy_model(res::Int, boxsize::Real, cosmo, pk_table::Dict;
                       R::Real, observer::AbstractVector, a_far::Real, a_near::Real,
                       n_order::Int=3, n_sub::Int=1, rsd::Bool=false, ref_seed::Int=0,
-                      T::Type{<:AbstractFloat}=Float64)
+                      ext::Union{Nothing,Int}=nothing, T::Type{<:AbstractFloat}=Float64)
     n_order in (1, 2, 3) || error("n_order must be 1 (1LPT/Zel'dovich, cheapest), 2 (2LPT) or 3 (3LPT)")
     op  = ic_operator(res, boxsize, pk_table; T=T)
-    K   = nlpt_kernels(res, boxsize; T=T)
+    # `ext` = de-aliasing grid size (default 3res/2, exact). A smaller ext shrinks the memory-dominant
+    # ext-FFTs (the res-512 unlock) for a small, quantified aliasing error in the LPT correction.
+    K   = ext === nothing ? nlpt_kernels(res, boxsize; T=T) : nlpt_kernels(res, boxsize; T=T, ext=ext)
     ops = bias_operators(res, boxsize, R; T=T)
     qflat = reshape(lagrangian_grid_3d(res, boxsize; T=T), res^3, 3)
     ωref = randn(MersenneTwister(ref_seed), T, res, res, res)

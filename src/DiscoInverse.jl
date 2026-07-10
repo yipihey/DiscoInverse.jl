@@ -47,6 +47,10 @@ export EchoesCatalog, load_echoes_realization, load_echoes_randoms, n_realizatio
 include("data/echoes_io.jl")
 export QuaiaCatalog, load_quaia, load_quaia_randoms
 include("data/quaia_io.jl")
+export DESRedmagicCatalog, load_des_redmagic
+include("data/des_io.jl")
+export DESIQSOCatalog, load_desi_qso
+include("data/desi_io.jl")
 
 # ── Geometry: wedge → comoving box ────────────────────────────────────────────
 export fiducial_cosmology, radec_z_to_cartesian, BoxGeometry, box_geometry, embed, embed_radec_z
