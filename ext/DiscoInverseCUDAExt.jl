@@ -10,7 +10,7 @@ KA atomic-scatter deposit) — ~30× the CPU forward, ~33× the gradient (res=64
 module DiscoInverseCUDAExt
 
 using DiscoInverse
-using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem, Tracer, MultiTracerProblem, LensingConstraint, VelocityConstraint
+using DiscoInverse: GalaxyModel, BiasOperators, InferenceProblem, SheetProblem, Tracer, SheetTracer, MultiTracerProblem, LensingConstraint, VelocityConstraint
 using DiscoDJNative
 using CUDA
 
@@ -55,6 +55,9 @@ end
 # as CuArrays (cell lists stay host — the deposit kernels copy points to the backend per call).
 function DiscoInverse.gpu(tr::Tracer)
     return Tracer(CuArray(tr.pts), tr.cl, CuArray(tr.window), tr.b0, CuArray(tr.u), tr.Utot)
+end
+function DiscoInverse.gpu(tr::SheetTracer)   # gal + random points to device; cell lists stay host
+    return SheetTracer(CuArray(tr.pts), tr.cl, CuArray(tr.ran_pts), tr.ran_cl, tr.b0, CuArray(tr.u), tr.Utot)
 end
 DiscoInverse.gpu(lc::LensingConstraint) = LensingConstraint(
     CuArray(lc.pts), lc.cl, lc.nd, lc.ns, CuArray(lc.Wdχ), CuArray(lc.κ_obs), CuArray(lc.invN),

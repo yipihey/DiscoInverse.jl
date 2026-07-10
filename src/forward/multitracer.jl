@@ -169,6 +169,27 @@ function tracer(gm::GalaxyModel{T}, pts::AbstractMatrix; b1::Real, window, u=not
     return Tracer(P, cl, Array{T,3}(window), T[b1, 0, 0], uu, T(sum(uu)))
 end
 
+# ── Sheet-native tracer: NO grid window (no CIC). The survey footprint enters as the RANDOM POINTS, and
+# the Poisson normalization Z is the Monte-Carlo integral of the tessellation density over them,
+# Z = ⟨ρ_sheet(x_random)⟩ — so both the data term (ρ at galaxies) and Z (ρ at randoms) are evaluated
+# purely on the phase-space sheet via `interp_sheet_at_points`.  The only grid/FFT anywhere is the 2LPT
+# calculation of ψ; `survey_window`/`bin_galaxies` (CIC deposits) are never touched.
+struct SheetTracer{P, C, RP, RC, U, T<:AbstractFloat}
+    pts::P; cl::C; ran_pts::RP; ran_cl::RC; b0::Vector{T}; u::U; Utot::T
+end
+
+"""    sheet_tracer(gm, gal_pts, ran_pts; b1, u=nothing) -> SheetTracer
+
+Sheet-native tracer from galaxy box positions `gal_pts` and survey random positions `ran_pts` (both N×3).
+The footprint is the randoms themselves (Monte-Carlo Z = ⟨ρ_sheet(randoms)⟩) — no `survey_window`/CIC grid."""
+function sheet_tracer(gm::GalaxyModel{T}, gal_pts::AbstractMatrix, ran_pts::AbstractMatrix;
+                      b1::Real, u=nothing) where {T}
+    G = T.(gal_pts); R = T.(ran_pts); h = gm.boxsize / gm.res
+    gcl = build_cell_list(G, h); rcl = build_cell_list(R, h)
+    uu = u === nothing ? ones(T, size(G, 1)) : Vector{T}(u)
+    return SheetTracer(G, gcl, R, rcl, T[b1, 0, 0], uu, T(sum(uu)))
+end
+
 struct MultiTracerProblem{T<:AbstractFloat, GM, TR, LC, VC}
     gm::GM
     tracers::TR                 # Vector{Tracer}
@@ -198,6 +219,15 @@ function _tracer_pp_loss(gm, δL, s2, xg, tr::Tracer, ρfloor, floor_frac)
     ρv, Z = nodal_density(xg, _apply_window(wg, tr.window), gm.res, gm.boxsize; floor_frac=floor_frac)
     ρg = interp_sheet_at_points(xg, ρv, tr.pts, tr.cl, gm.res)
     return -sum(tr.u .* log.(max.(ρg, ρfloor))) + tr.Utot * log(Z)
+end
+
+# sheet-native (no grid window): Z = ⟨ρ_sheet(randoms)⟩ (Monte-Carlo over the footprint), all on the sheet
+function _tracer_pp_loss(gm, δL, s2, xg, tr::SheetTracer, ρfloor, floor_frac)
+    wg = _apply_window(_sheet_weight(gm, δL, s2, tr.b0), nothing)     # max(bias,0); NO window/CIC
+    ρv, _ = nodal_density(xg, wg, gm.res, gm.boxsize; floor_frac=floor_frac)
+    ρg = interp_sheet_at_points(xg, ρv, tr.pts, tr.cl, gm.res)        # sheet density at galaxies
+    ρr = interp_sheet_at_points(xg, ρv, tr.ran_pts, tr.ran_cl, gm.res) # …at randoms → normalization
+    return -sum(tr.u .* log.(max.(ρg, ρfloor))) + tr.Utot * log(max(mean(ρr), ρfloor))
 end
 
 # sum of the per-tracer point-process terms (handles an empty tracer list: lensing-/velocity-only)

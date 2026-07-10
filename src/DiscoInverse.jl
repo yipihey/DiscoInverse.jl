@@ -103,7 +103,7 @@ export constrained_ic_box, constrained_ic_box_ensemble, refine_phases, export_wh
 include("forward/constrained_box.jl")
 
 # ── Multi-tracer joint field reconstruction (Quaia + DESI + BOSS + eBOSS + …) ──
-export Tracer, tracer, MultiTracerProblem, multitracer_problem, multitracer_phase_loss, reconstruct_joint_field
+export Tracer, tracer, SheetTracer, sheet_tracer, MultiTracerProblem, multitracer_problem, multitracer_phase_loss, reconstruct_joint_field
 export LensingConstraint, lensing_constraint, kappa_map
 export VelocityConstraint, velocity_constraint, radial_velocity, velocity_amplitude
 include("forward/multitracer.jl")
