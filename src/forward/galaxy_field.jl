@@ -72,8 +72,10 @@ the lightcone).  `b = (b₁, b₂, b_s2)`.
 """
 function galaxy_density(gm::GalaxyModel{T}, ω::AbstractArray{T,3}, b) where {T}
     fphi   = white_noise_to_fphi(gm.op, ω)
-    shapes = compute_core_exact(fphi, gm.K; n_order=gm.n_order)
-    Psi    = exact_shape_stack(shapes)
+    Psi    = _shapes_ck(fphi, gm.K, gm.n_order)   # memory-optimized shape stack (streaming fmu2_sym +
+                                                  # staged checkpoints) — was raw compute_core_exact +
+                                                  # exact_shape_stack, which taped the full ext-grid stack
+                                                  # (~45 GB at res 192); see forward/sheet_field.jl.
     δL, s2 = bias_fields(fphi, gm.ops)
     wg     = bias_weight(δL, s2, gm.sigma2, gm.s2mean; b1=b[1], b2=b[2], bs2=b[3])
     lc     = lightcone_cross_ad(Psi, gm.qflat, gm.cosmo, gm.observer, gm.a_far, gm.a_near; rsd=gm.rsd)
