@@ -120,7 +120,6 @@ function constrained_ic_box(cat::QuaiaCatalog, randoms, cosmo; L_box::Real,
     pk   = linear_power_spectrum(cosmo)
     geom = box_geometry(randoms, cosmo; res=res_constrain, boxsize=L_box)
     L    = geom.boxsize; dx = L / res_constrain
-    W    = survey_window(geom, randoms)
     Rsm  = R === nothing ? max(2dx, 80.0) : Float64(R)
     gm   = galaxy_model(res_constrain, L, cosmo, pk; R=Rsm, observer=geom.observer,
                         a_far=geom.a_far, a_near=geom.a_near, n_order=n_order, rsd=false)
@@ -130,7 +129,8 @@ function constrained_ic_box(cat::QuaiaCatalog, randoms, cosmo; L_box::Real,
         cat = QuaiaCatalog(cat.ra, cat.dec, eltype(cat.z_obs).(z_fixed), cat.σz)
         ci  = 0
     end
-    prob = quaia_problem(cat, geom, gm, W; b1=b1)
+    # sheet-native: pass the randoms (Z = ⟨ρ_sheet(randoms)⟩), NOT a survey_window/CIC grid
+    prob = quaia_problem(cat, geom, gm, nothing; b1=b1, randoms=randoms)
     r    = reconstruct_quaia(prob, seed; device=device, rounds=rounds,
                              phase_iters=phase_iters, chi_iters=ci, b1=b1)
     ω_box = refine_phases(r.φ, res_box; seed=seed, fixed_amplitude=fixed_amplitude)

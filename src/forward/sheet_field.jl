@@ -114,7 +114,20 @@ function galaxy_density_sheet_c0_masked(gm::GalaxyModel, ω, b, pts, cl, active;
     return (ρg, Z)
 end
 
-struct SheetProblem{T<:AbstractFloat, GM, P, C, U, W, A}
+"""    galaxy_density_sheet_c0_rand(gm, ω, b, pts, cl, ran_pts, ran_cl; floor_frac=1e-3) -> (ρ_g, Z)
+
+Sheet-native (NO grid window): the C⁰ tessellation density is evaluated at the galaxies (`pts`) AND at the
+survey random points (`ran_pts`); the Poisson normalization is the Monte-Carlo integral over the randoms,
+`Z = ⟨ρ_sheet(x_random)⟩`.  The footprint enters as the randoms, never as a `survey_window`/CIC deposit."""
+function galaxy_density_sheet_c0_rand(gm::GalaxyModel, ω, b, pts, cl, ran_pts, ran_cl; floor_frac::Real=1e-3)
+    xg, wg = _sheet_inputs(gm, ω, b)
+    ρv, _ = nodal_density(xg, _apply_window(wg, nothing), gm.res, gm.boxsize; floor_frac=floor_frac)  # max(bias,0)
+    ρg = interp_sheet_at_points(xg, ρv, pts, cl, gm.res)
+    ρr = interp_sheet_at_points(xg, ρv, ran_pts, ran_cl, gm.res)
+    return (ρg, mean(ρr))
+end
+
+struct SheetProblem{T<:AbstractFloat, GM, P, C, U, W, A, RP, RC}
     gm::GM
     pts::P                  # (N_gal, 3) galaxy positions (fixed; redshift space)
     cl::C                   # chaining-mesh cell list on pts (built once)
@@ -124,16 +137,18 @@ struct SheetProblem{T<:AbstractFloat, GM, P, C, U, W, A}
     ρfloor::T               # floor for log ρ_g (galaxies in no tet)
     floor_frac::T           # caustic floor: |V_T| ≥ floor_frac·V_Lagrangian (caps ρ_T)
     c0::Bool                # C⁰ nodal-averaged density (true, optimizable) vs piecewise-constant
-    window::W               # survey footprint mask (res³, Lagrangian) folded into w_T, or nothing
+    window::W               # LEGACY grid window (res³, Lagrangian); prefer `ran_pts` (sheet-native), or nothing
     active::A               # footprint trace-back mask (Bool res³) → sheet-on-mask (~9× fewer tets), or nothing
+    ran_pts::RP             # sheet-native: survey RANDOM positions (N_ran,3) → Z=⟨ρ_sheet(randoms)⟩, or nothing
+    ran_cl::RC              # cell list on the randoms, or nothing
 end
 
-"""    sheet_problem(gm, pts; u, b0, σb, ρfloor=1e-8, floor_frac=1e-3, c0=true, window=nothing, h=cell) -> SheetProblem
+"""    sheet_problem(gm, pts; ran_pts=nothing, u, b0, σb, ρfloor=1e-8, floor_frac=1e-3, c0=true, window=nothing, h=cell) -> SheetProblem
 
-`window` (res³ footprint field, e.g. from `survey_window(geom, randoms)`) folds into the
-per-vertex weight so the normalization integrates only over the observed volume — required
-for real survey data (else the optimizer games Z with spurious out-of-footprint structure)."""
-function sheet_problem(gm::GalaxyModel{T}, pts::AbstractMatrix; u=nothing,
+**Sheet-native (recommended):** pass `ran_pts` (survey RANDOM box positions, N_ran×3) — the Poisson
+normalization becomes `Z = ⟨ρ_sheet(x_random)⟩` on the tessellation, no grid/CIC.  Legacy: `window` (res³
+from `survey_window`, a CIC deposit) folds into the per-vertex weight instead — kept for back-compat."""
+function sheet_problem(gm::GalaxyModel{T}, pts::AbstractMatrix; ran_pts=nothing, u=nothing,
                        b0=[1.0,0,0], σb=[5.0,5,5], ρfloor::Real=1e-8, floor_frac::Real=1e-3,
                        c0::Bool=true, window=nothing, active=nothing, h=nothing) where {T}
     P = T.(pts); hh = h === nothing ? gm.boxsize/gm.res : T(h)
@@ -141,8 +156,10 @@ function sheet_problem(gm::GalaxyModel{T}, pts::AbstractMatrix; u=nothing,
     uu = u === nothing ? ones(T, size(P,1)) : Vector{T}(u)
     win = window === nothing ? nothing : Array{T,3}(window)
     act = active === nothing ? nothing : Array{Bool,3}(active)
-    return SheetProblem{T, typeof(gm), typeof(P), typeof(cl), typeof(uu), typeof(win), typeof(act)}(gm, P, cl, uu, sum(uu),
-                          Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac), c0, win, act)
+    RP = ran_pts === nothing ? nothing : T.(ran_pts)
+    rcl = ran_pts === nothing ? nothing : build_cell_list(RP, hh)
+    return SheetProblem{T, typeof(gm), typeof(P), typeof(cl), typeof(uu), typeof(win), typeof(act), typeof(RP), typeof(rcl)}(
+                          gm, P, cl, uu, sum(uu), Vector{T}(b0), Vector{T}(σb), T(ρfloor), T(floor_frac), c0, win, act, RP, rcl)
 end
 
 # mixed-precision NUTS hook: an F32 SheetProblem evaluates its analytic forward in F32
@@ -150,6 +167,8 @@ end
 _model_T(prob::SheetProblem{T}) where {T} = T
 
 _sheet_dens(prob::SheetProblem, ω, b) =
+    prob.ran_pts !== nothing ?                                   # sheet-native: Z from randoms (no grid window)
+        galaxy_density_sheet_c0_rand(prob.gm, ω, b, prob.pts, prob.cl, prob.ran_pts, prob.ran_cl; floor_frac=prob.floor_frac) :
     prob.active !== nothing ?
         galaxy_density_sheet_c0_masked(prob.gm, ω, b, prob.pts, prob.cl, prob.active; floor_frac=prob.floor_frac, window=prob.window) :
     prob.c0 ?

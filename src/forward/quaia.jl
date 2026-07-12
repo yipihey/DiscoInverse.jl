@@ -49,7 +49,8 @@ struct QuaiaProblem{T<:AbstractFloat, GM, BG, F}
     χ_obs::Vector{T}        # photo-z comoving distance (the prior centre)
     σχ::Vector{T}           # photo-z radial width = χ(z_obs+σ_z) − χ(z_obs)
     u::Vector{T}            # per-quasar weights
-    window::Array{T,3}      # survey window (res³, folds into Z)
+    window::Array{T,3}      # LEGACY grid window (res³); used only if ran_pts is empty
+    ran_pts::Matrix{T}      # sheet-native: survey RANDOM box positions (N_ran,3) → Z=⟨ρ_sheet(randoms)⟩ (empty ⇒ legacy)
     res::Int
     boxsize::T
     dx::T
@@ -65,7 +66,7 @@ Precompute the χ-space quantities (sky directions, χ_obs, σχ, the χ→z tab
 `window` is e.g. `survey_window(geom, randoms)`; `gm` a `galaxy_model(res, L, …; rsd=false)`
 (RSD ≪ σ_z, so real-space).  `b1` is held fixed during the phase step."""
 function quaia_problem(cat::QuaiaCatalog{T}, geom::BoxGeometry, gm::GalaxyModel, window;
-                       b1::Real=2.5, u=nothing) where {T}
+                       b1::Real=2.5, u=nothing, randoms=nothing) where {T}
     cosmo = geom.cosmo
     nhat  = sky_directions(cat.ra, cat.dec)
     χ_obs = T[comoving_distance(cosmo, 1 / (1 + zi)) for zi in cat.z_obs]
@@ -74,8 +75,12 @@ function quaia_problem(cat::QuaiaCatalog{T}, geom::BoxGeometry, gm::GalaxyModel,
     shift = reshape(T.(geom.shift), 1, 3)
     uu    = u === nothing ? ones(T, length(cat)) : Vector{T}(u)
     res   = geom.res; L = T(geom.boxsize); dx = L / res
+    # sheet-native footprint: the survey randoms as box positions (Z = ⟨ρ_sheet(randoms)⟩; no grid window)
+    rp    = randoms === nothing ? Matrix{T}(undef, 0, 3) :
+            T.(radec_z_to_cartesian(randoms.ra, randoms.dec, randoms.z, cosmo)) .+ shift
+    win   = window === nothing ? ones(T, res, res, res) : Array{T,3}(window)
     return QuaiaProblem{T, typeof(gm), typeof(geom), typeof(build_z_of_χ(cosmo))}(
-        gm, geom, Matrix{T}(nhat), shift, χ_obs, σχ, uu, Array{T,3}(window),
+        gm, geom, Matrix{T}(nhat), shift, χ_obs, σχ, uu, win, rp,
         res, L, T(dx), T(b1), build_z_of_χ(cosmo))
 end
 
@@ -105,22 +110,23 @@ function reconstruct_quaia(prob::QuaiaProblem{T}, seed::Integer; device=identity
                            b1::Real=prob.b1) where {T}
     usegpu = device !== identity
     res = prob.res; L = prob.boxsize; dx = prob.dx; bb = [T(b1), zero(T), zero(T)]
+    sheet = size(prob.ran_pts, 1) > 0                                     # sheet-native (randoms) vs legacy grid window
     # device copies of the fixed χ-step data (no-ops on host)
     nhat_d = device(prob.nhat); shift_d = device(prob.shift)
     χobs_d = device(prob.χ_obs); σχ_d = device(prob.σχ); u_d = device(prob.u)
-    win_d  = device(prob.window)
+    win_d  = sheet ? nothing : device(prob.window)
     gm_d   = usegpu ? gpu(prob.gm) : prob.gm
     χ = copy(prob.χ_obs); φ = nothing; local ω
     for _ in 1:rounds
         pos = quaia_positions(prob.nhat, prob.shift, χ)                       # host positions
-        sp  = sheet_problem(prob.gm, pos; u=prob.u, b0=[T(b1), 0, 0],
-                            σb=[5.0, 5.0, 5.0], window=prob.window)
+        sp  = sheet ? sheet_problem(prob.gm, pos; ran_pts=prob.ran_pts, u=prob.u, b0=[T(b1), 0, 0], σb=[5.0, 5.0, 5.0]) :
+                      sheet_problem(prob.gm, pos; window=prob.window, u=prob.u, b0=[T(b1), 0, 0], σb=[5.0, 5.0, 5.0])
         spd = usegpu ? gpu(sp) : sp
         φ0  = device(φ === nothing ? 2π .* rand(MersenneTwister(seed), res ÷ 2 + 1, res, res) : φ)
         r   = phase_map_optimize(spd, φ0; b1_grid=[T(b1)], phase_iters=phase_iters, b2=0.0, bs2=0.0)
         φ   = Array(r.φ); ω = r.ω
         xg, wg = _sheet_inputs(gm_d, ω, bb)
-        ρv, _  = nodal_density(xg, _apply_window(wg, win_d), res, L)
+        ρv, _  = nodal_density(xg, _apply_window(wg, win_d), res, L)          # win_d=nothing ⇒ windowless (sheet)
         f   = cc -> _quaia_chi_loss(cc, xg, ρv, nhat_d, shift_d, χobs_d, σχ_d, u_d, dx, res)
         cg, _, _ = _lbfgs_generic(f, cc -> Zygote.gradient(f, cc)[1], device(χ); iters=chi_iters)
         χ   = Array(cg)

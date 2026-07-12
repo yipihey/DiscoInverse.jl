@@ -45,10 +45,11 @@ end
 # backend per call anyway (`mv` in sheet_density.jl); the bias 3-vectors stay on the host.
 function DiscoInverse.gpu(prob::SheetProblem{T}) where {T}
     gmg = DiscoInverse.gpu(prob.gm); ug = CuArray(prob.u)
-    win = prob.window === nothing ? nothing : CuArray(prob.window)
-    act = prob.active === nothing ? nothing : CuArray(prob.active)
-    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug), typeof(win), typeof(act)}(
-        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0, win, act)
+    win = prob.window  === nothing ? nothing : CuArray(prob.window)
+    act = prob.active  === nothing ? nothing : CuArray(prob.active)
+    rp  = prob.ran_pts === nothing ? nothing : CuArray(prob.ran_pts)   # randoms → device; cell list stays host
+    return SheetProblem{T, typeof(gmg), typeof(prob.pts), typeof(prob.cl), typeof(ug), typeof(win), typeof(act), typeof(rp), typeof(prob.ran_cl)}(
+        gmg, prob.pts, prob.cl, ug, prob.Utot, prob.b0, prob.σb, prob.ρfloor, prob.floor_frac, prob.c0, win, act, rp, prob.ran_cl)
 end
 
 # Move a joint multi-tracer problem to the device: GPU forward + each tracer's positions/window/weights
