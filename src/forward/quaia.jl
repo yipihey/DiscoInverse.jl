@@ -122,7 +122,7 @@ function reconstruct_quaia(prob::QuaiaProblem{T}, seed::Integer; device=identity
         sp  = sheet ? sheet_problem(prob.gm, pos; ran_pts=prob.ran_pts, u=prob.u, b0=[T(b1), 0, 0], σb=[5.0, 5.0, 5.0]) :
                       sheet_problem(prob.gm, pos; window=prob.window, u=prob.u, b0=[T(b1), 0, 0], σb=[5.0, 5.0, 5.0])
         spd = usegpu ? gpu(sp) : sp
-        φ0  = device(φ === nothing ? 2π .* rand(MersenneTwister(seed), res ÷ 2 + 1, res, res) : φ)
+        φ0  = device(φ === nothing ? T(2π) .* rand(MersenneTwister(seed), T, res ÷ 2 + 1, res, res) : φ)
         r   = phase_map_optimize(spd, φ0; b1_grid=[T(b1)], phase_iters=phase_iters, b2=0.0, bs2=0.0)
         φ   = Array(r.φ); ω = r.ω
         xg, wg = _sheet_inputs(gm_d, ω, bb)
